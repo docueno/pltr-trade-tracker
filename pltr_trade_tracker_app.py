@@ -164,7 +164,4 @@ if not df.empty:
     st.write(f"Total Trades: {len(df)}")
     st.write(f"Wins: {len(df[df['Actual Result']=='Win'])}")
     st.write(f"Losses: {len(df[df['Actual Result']=='Loss'])}")
-    st.write(f"Breakevens: {len(df[df'Actual Result']=='Breakeven'])}")
-    st.write(f"Total Net P/L: {round(df['Profit/Loss'].sum(),2)}")
-else:
-    st.info("No trades logged yet.")
+    st.write(f"Breakevens: {len(df[df['Actual Result']=='Breakeven'])}")
