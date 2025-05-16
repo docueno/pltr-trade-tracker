@@ -3,14 +3,29 @@ import pandas as pd
 from datetime import datetime
 import yfinance as yf
 import plotly.graph_objs as go
-from pushbullet import Pushbullet
+import requests
 
-# Load Pushbullet API Key
-PUSHBULLET_API_KEY = st.secrets["pushbullet_api_key"]
-pb = Pushbullet(PUSHBULLET_API_KEY)
+# Pushover credentials from Streamlit secrets
+PUSHOVER_USER_KEY = st.secrets.get("pushover_user_key", "")
+PUSHOVER_API_TOKEN = st.secrets.get("pushover_api_token", "")
+
+def send_pushover_notification(title, message):
+    if PUSHOVER_USER_KEY and PUSHOVER_API_TOKEN:
+        data = {
+            "token": PUSHOVER_API_TOKEN,
+            "user": PUSHOVER_USER_KEY,
+            "title": title,
+            "message": message
+        }
+        requests.post("https://api.pushover.net/1/messages.json", data=data)
 
 st.set_page_config(page_title="PLTR Trade Tracker", layout="wide")
 st.title("📈 PLTR Day Trade Tracker with Charts & Alerts")
+
+# Manual test button
+if st.button("📨 Send Test Notification to iPhone"):
+    send_pushover_notification("✅ Test Notification", "Pushover is successfully connected!")
+    st.success("Test notification sent to your iPhone.")
 
 # Initialize or load data
 @st.cache_data
@@ -67,16 +82,16 @@ for index, row in df.iterrows():
         st.write(f"📋 Notes: {row['Notes']}")
         st.write(f"Status: {row['Actual Result']} | P/L: {row['Profit/Loss']}")
 
-        # Push alerts
+        # Push alerts using Pushover
         if row["Actual Result"] == "Pending":
             if (row["Trade Type"] in ["Call", "Breakout"] and current_price >= row["Target Price"]) or \
                (row["Trade Type"] in ["Put", "Breakdown"] and current_price <= row["Target Price"]):
                 st.success(f"📈 Target hit at ${current_price:.2f}")
-                pb.push_note("PLTR Target Hit", f"{row['Trade Type']} trade hit target at ${current_price:.2f}")
+                send_pushover_notification("PLTR Target Hit", f"{row['Trade Type']} trade hit target at ${current_price:.2f}")
             elif (row["Trade Type"] in ["Call", "Breakout"] and current_price <= row["Stop Loss"]) or \
                  (row["Trade Type"] in ["Put", "Breakdown"] and current_price >= row["Stop Loss"]):
                 st.error(f"⚠️ Stop loss hit at ${current_price:.2f}")
-                pb.push_note("PLTR Stop Hit", f"{row['Trade Type']} trade hit stop at ${current_price:.2f}")
+                send_pushover_notification("PLTR Stop Hit", f"{row['Trade Type']} trade hit stop at ${current_price:.2f}")
 
     with col2:
         history = ticker.history(period="2d", interval="5m")
