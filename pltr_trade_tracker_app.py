@@ -5,7 +5,7 @@ import yfinance as yf
 import plotly.graph_objs as go
 import requests
 
-# Pushover credentials from Streamlit secrets
+# ✅ Safely load secrets with .get() to avoid KeyErrors
 PUSHOVER_USER_KEY = st.secrets.get("pushover_user_key", "")
 PUSHOVER_API_TOKEN = st.secrets.get("pushover_api_token", "")
 
@@ -22,12 +22,11 @@ def send_pushover_notification(title, message):
 st.set_page_config(page_title="PLTR Trade Tracker", layout="wide")
 st.title("📈 PLTR Day Trade Tracker with Charts & Alerts")
 
-# Manual test button
+# Test notification button
 if st.button("📨 Send Test Notification to iPhone"):
     send_pushover_notification("✅ Test Notification", "Pushover is successfully connected!")
     st.success("Test notification sent to your iPhone.")
 
-# Initialize or load data
 @st.cache_data
 def load_data():
     return pd.DataFrame(columns=[
@@ -37,7 +36,6 @@ def load_data():
 
 df = load_data()
 
-# Input form
 with st.form("trade_form"):
     st.subheader("Log a New Trade")
     trade_type = st.selectbox("Trade Type", ["Breakout", "Breakdown", "Range", "Call", "Put"])
@@ -63,18 +61,15 @@ with st.form("trade_form"):
         df = pd.concat([df, new_row], ignore_index=True)
         st.success("Trade added successfully!")
 
-# Profit/Loss calculation
 df["Profit/Loss"] = df.apply(lambda row:
     round((row["Exit Price"] - row["Entry Price"]), 2) if row["Trade Type"] in ["Call", "Breakout"]
     else round((row["Entry Price"] - row["Exit Price"]), 2) if row["Trade Type"] in ["Put", "Breakdown"]
     else 0, axis=1)
 
-# Live price tracking
 ticker = yf.Ticker("PLTR")
 current_price = ticker.history(period="1d", interval="1m").iloc[-1]["Close"]
 st.metric(label="🔔 Live PLTR Price", value=f"${current_price:.2f}")
 
-# Display trades and charts
 for index, row in df.iterrows():
     col1, col2 = st.columns([2, 3])
     with col1:
@@ -82,7 +77,6 @@ for index, row in df.iterrows():
         st.write(f"📋 Notes: {row['Notes']}")
         st.write(f"Status: {row['Actual Result']} | P/L: {row['Profit/Loss']}")
 
-        # Push alerts using Pushover
         if row["Actual Result"] == "Pending":
             if (row["Trade Type"] in ["Call", "Breakout"] and current_price >= row["Target Price"]) or \
                (row["Trade Type"] in ["Put", "Breakdown"] and current_price <= row["Target Price"]):
@@ -108,11 +102,9 @@ for index, row in df.iterrows():
         fig.update_layout(title=f"PLTR Chart - Entry ${row['Entry Price']}", height=300)
         st.plotly_chart(fig, use_container_width=True)
 
-# Download button
 csv = df.to_csv(index=False).encode('utf-8')
 st.download_button("📥 Download CSV", data=csv, file_name='pltr_day_trade_tracker.csv', mime='text/csv')
 
-# Summary
 st.subheader("📌 Summary")
 if not df.empty:
     st.write(f"Total Trades: {len(df)}")
