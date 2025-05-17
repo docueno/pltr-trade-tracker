@@ -58,16 +58,22 @@ def headline_sentiment_score(headlines):
 st.set_page_config(page_title="PLTR Day Trade Tracker", layout="wide")
 
 # --- Hard Stop Control ---
-# Add a global pause checkbox: checked state persists across reruns via session_state
+# Use query params to persist pause across sessions
+params = st.experimental_get_query_params()
+pause_default = params.get("pause", ["0"])[0] == "1"
 pause_all = st.sidebar.checkbox(
     "Pause All App Logic",
-    value=st.session_state.get("pause_all", False),
+    value= pause_default,
     key="pause_all",
     help="When checked, the app will halt all data updates, notifications, and charts."
 )
+# Update query params when toggled
 if pause_all:
+    st.experimental_set_query_params(pause="1")
     st.sidebar.info("⏸️ App is paused. Uncheck to resume.")
     st.stop()
+else:
+    st.experimental_set_query_params(pause="0")
 
 
 # --- Sidebar Controls (always visible) ---
