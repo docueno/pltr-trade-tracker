@@ -135,6 +135,27 @@ for symbol in symbols:
     history['AvgVol'] = history['Volume'].rolling(20).mean()
 
     # --- 4️⃣ Debug Info ---
+    # 🧠 Pattern Recognition
+    # Breakout scan
+    prior_high = history['High'].rolling(window=20).max().shift(1)
+    breakout = latest['Close'] > prior_high.iloc[-1] if not prior_high.empty else False
+    # Cup and handle detection (naive)
+    window = history['Close'].tail(30)
+    cup = window.iloc[0] > window.min() < window.iloc[-1] and window.argmin() in range(10,20)
+    # Triangle detection (naive)
+    highs = history['High'].tail(20)
+    lows = history['Low'].tail(20)
+    rng = highs - lows
+    triangle = rng.iloc[0] > rng.iloc[-1] and all(rng.iloc[i] > rng.iloc[i+1] for i in range(len(rng)-1))
+    if cup:
+        pattern_msg = "Cup-and-Handle pattern detected"
+    elif triangle:
+        pattern_msg = "Triangle pattern detected"
+    elif breakout:
+        pattern_msg = "Breakout of 20-period high"
+    else:
+        pattern_msg = "No pattern detected"
+    st.write(f"🧠 Pattern Recognition: {pattern_msg}")
     st.markdown("### 📊 Debug Info")
     st.write("Last 5 Rows of History:")
     st.dataframe(history.tail(5))
