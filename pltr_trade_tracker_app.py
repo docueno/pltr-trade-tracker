@@ -67,14 +67,17 @@ def load_data():
 df = load_data()
 
 # --- 2️⃣ Symbol Selection & Trade Logging Form ---
-symbols = st.multiselect(
-    "Select symbols to track:",
-    ["PLTR", "TSLA", "AAPL"],
-    default=["PLTR"]
+# Enter symbols to track
+symbol_input = st.text_input(
+    "Enter symbols to track (comma-separated)",
+    value="PLTR,TSLA,AAPL",
+    help="Type ticker symbols separated by commas."
 )
+symbols = [s.strip().upper() for s in symbol_input.split(",") if s.strip()]
 
 with st.form("trade_form"):
     st.subheader("Log a New Trade")
+    # Choose which symbol this trade applies to
     trade_symbol = st.selectbox("Symbol", symbols)
     trade_type = st.selectbox("Trade Type", ["Breakout", "Breakdown", "Range", "Call", "Put"])
     entry = st.number_input("Entry Price", format="%.2f")
@@ -102,7 +105,7 @@ with st.form("trade_form"):
         df = pd.concat([df, new_row], ignore_index=True)
         st.success("Trade added successfully!")
 
-# --- 3️⃣ Fetch & Compute Indicators for Each Symbol ---
+# --- 3️⃣ Fetch & Compute Indicators for Each Symbol --- & Compute Indicators for Each Symbol ---
 for symbol in symbols:
     st.markdown(f"## 📊 {symbol} Analysis")
     ticker = yf.Ticker(symbol)
