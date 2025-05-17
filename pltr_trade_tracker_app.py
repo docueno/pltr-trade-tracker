@@ -196,17 +196,17 @@ for symbol in symbols:
     st.write("Shape:", history.shape)
     st.write("Columns:", history.columns.tolist())
 
-# 📰 5️⃣ News Sentiment Analysis
-            headlines = get_headlines(symbol)
-            sentiment = headline_sentiment_score(headlines)
-            st.write(f"📰 News Sentiment (avg score): {sentiment:.2f}")
-            # Optionally adjust confidence based on sentiment
-            if sentiment > 0.2:
-                confidence = min(100, confidence + 10)
-            elif sentiment < -0.2:
-                confidence = max(0, confidence - 10)
+    # 📰 5️⃣ News Sentiment Analysis
+    headlines = get_headlines(symbol)
+    sentiment = headline_sentiment_score(headlines)
+    st.write(f"📰 News Sentiment (avg score): {sentiment:.2f}")
+    # Optionally adjust confidence based on sentiment
+    if sentiment > 0.2:
+        confidence = min(100, confidence + 10)
+    elif sentiment < -0.2:
+        confidence = max(0, confidence - 10)
 
-# --- 5️⃣ Strategy Logic & Chart --- & Chart ---
+# --- 5️⃣ Strategy Logic & Chart --- & Chart --- & Chart ---
     if not auto_refresh:
         st.info("⏸ Strategy logic is paused while Auto-Refresh is off.")
     else:
