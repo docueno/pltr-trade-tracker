@@ -28,6 +28,32 @@ def send_pushover_notification(title, message):
         }
         requests.post("https://api.pushover.net/1/messages.json", data=data)
 
+# 📰 News Sentiment Analysis Setup
+NEWS_API_KEY = st.secrets.get("news_api_key", "")
+
+# Optional: use VADER for lightweight sentiment
+from nltk.sentiment.vader import SentimentIntensityAnalyzer
+sia = SentimentIntensityAnalyzer()
+
+def get_headlines(symbol):
+    """Fetch latest headlines for a given symbol using NewsAPI."""
+    if not NEWS_API_KEY:
+        return []
+    url = (
+        f"https://newsapi.org/v2/everything?"
+        f"q={symbol}&sortBy=publishedAt&pageSize=5&apiKey={NEWS_API_KEY}"
+    )
+    articles = requests.get(url).json().get("articles", [])
+    return [f"{a['title']}: {a.get('description','')}" for a in articles]
+
+def headline_sentiment_score(headlines):
+    """Compute average compound sentiment score for a list of headlines."""
+    if not headlines:
+        return 0.0
+    scores = [sia.polarity_scores(h)["compound"] for h in headlines]
+    return sum(scores) / len(scores)
+
+
 # --- Streamlit Page Setup ---
 st.set_page_config(page_title="PLTR Day Trade Tracker", layout="wide")
 
@@ -169,6 +195,16 @@ for symbol in symbols:
     st.dataframe(history.tail(5))
     st.write("Shape:", history.shape)
     st.write("Columns:", history.columns.tolist())
+
+# 📰 5️⃣ News Sentiment Analysis
+            headlines = get_headlines(symbol)
+            sentiment = headline_sentiment_score(headlines)
+            st.write(f"📰 News Sentiment (avg score): {sentiment:.2f}")
+            # Optionally adjust confidence based on sentiment
+            if sentiment > 0.2:
+                confidence = min(100, confidence + 10)
+            elif sentiment < -0.2:
+                confidence = max(0, confidence - 10)
 
 # --- 5️⃣ Strategy Logic & Chart --- & Chart ---
     if not auto_refresh:
