@@ -32,7 +32,7 @@ def send_pushover_notification(title, message):
 NEWS_API_KEY = st.secrets.get("news_api_key", "")
 
 # Optional: use VADER for lightweight sentiment
-from nltk.sentiment.vader import SentimentIntensityAnalyzer
+from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 sia = SentimentIntensityAnalyzer()
 
 def get_headlines(symbol):
