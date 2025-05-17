@@ -57,6 +57,14 @@ def headline_sentiment_score(headlines):
 # --- Streamlit Page Setup ---
 st.set_page_config(page_title="PLTR Day Trade Tracker", layout="wide")
 
+# --- Hard Stop Control ---
+# Add a global pause checkbox: uncheck to stop all app logic
+pause_all = st.sidebar.checkbox("Pause All App Logic", value=False, help="When checked, the app will halt all data updates, notifications, and charts.")
+if pause_all:
+    st.sidebar.info("⏸️ App is paused. Uncheck to resume.")
+    st.stop()
+
+
 # --- Sidebar Controls (always visible) ---
 with st.sidebar:
     st.header("🔧 Auto-Refresh Settings")
