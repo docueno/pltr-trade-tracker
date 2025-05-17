@@ -136,17 +136,25 @@ for symbol in symbols:
 
     # --- 4️⃣ Debug Info ---
     # 🧠 Pattern Recognition
+    # Last close price
+    last_close = history['Close'].iloc[-1]
     # Breakout scan
     prior_high = history['High'].rolling(window=20).max().shift(1)
-    breakout = latest['Close'] > prior_high.iloc[-1] if not prior_high.empty else False
+    breakout = last_close > prior_high.iloc[-1] if not prior_high.empty else False
     # Cup and handle detection (naive)
     window = history['Close'].tail(30)
-    cup = window.iloc[0] > window.min() < window.iloc[-1] and window.argmin() in range(10,20)
+    cup = False
+    if len(window) == 30:
+        trough_idx = window.idxmin()
+        trough_pos = list(window.index).index(trough_idx)
+        cup = (window.iloc[0] > window.min() < window.iloc[-1]) and (10 <= trough_pos <= 20)
     # Triangle detection (naive)
     highs = history['High'].tail(20)
     lows = history['Low'].tail(20)
     rng = highs - lows
-    triangle = rng.iloc[0] > rng.iloc[-1] and all(rng.iloc[i] > rng.iloc[i+1] for i in range(len(rng)-1))
+    triangle = False
+    if len(rng) >= 20:
+        triangle = (rng.iloc[0] > rng.iloc[-1]) and all(rng.iloc[i] > rng.iloc[i+1] for i in range(len(rng)-1))
     if cup:
         pattern_msg = "Cup-and-Handle pattern detected"
     elif triangle:
@@ -162,7 +170,7 @@ for symbol in symbols:
     st.write("Shape:", history.shape)
     st.write("Columns:", history.columns.tolist())
 
-    # --- 5️⃣ Strategy Logic & Chart ---
+# --- 5️⃣ Strategy Logic & Chart --- & Chart ---
     if not auto_refresh:
         st.info("⏸ Strategy logic is paused while Auto-Refresh is off.")
     else:
