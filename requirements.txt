@@ -1,4 +1,6 @@
 streamlit
+streamlit-autorefresh
+pandas
 yfinance
 plotly
-pushbullet.py
+requests
