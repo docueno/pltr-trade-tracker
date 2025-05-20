@@ -301,65 +301,37 @@ for symbol in symbols:
                 send_pushover_notification("Strategy Update", f"{symbol} trend: {trend_bias} at ${current_price:.2f}")
                 st.session_state.last_trend_bias = trend_bias
 
-            # Chart with markers
-fig = go.Figure(data=[go.Candlestick(
-    x=history.index,
-    open=history['Open'], high=history['High'],
-    low=history['Low'], close=history['Close']
-)])
-fig.add_trace(go.Scatter(x=history.index, y=history['EMA9'], mode='lines', name='EMA9'))
-fig.add_trace(go.Scatter(x=history.index, y=history['EMA21'], mode='lines', name='EMA21'))
+                        # Chart with markers
+            fig = go.Figure(data=[go.Candlestick(
+                x=history.index,
+                open=history['Open'], high=history['High'],
+                low=history['Low'], close=history['Close']
+            )])
+            fig.add_trace(go.Scatter(x=history.index, y=history['EMA9'], mode='lines', name='EMA9'))
+            fig.add_trace(go.Scatter(x=history.index, y=history['EMA21'], mode='lines', name='EMA21'))
 
-# Overlay entry/target/stop if set
-if entry is not None and entry > 0:
-    fig.add_hline(
-        y=entry,
-        line=dict(color='blue', dash='dot'),
-        annotation_text='Entry',
-        annotation_position='top left'
-    )
-if target is not None and target > 0:
-    fig.add_hline(
-        y=target,
-        line=dict(color='green', dash='dash'),
-        annotation_text='Target',
-        annotation_position='top right'
-    )
-if stop is not None and stop > 0:
-    fig.add_hline(
-        y=stop,
-        line=dict(color='red', dash='dash'),
-        annotation_text='Stop',
-        annotation_position='bottom right'
-    )
+            # Overlay entry/target/stop if set
+            if entry is not None and entry > 0:
+                fig.add_hline(
+                    y=entry,
+                    line=dict(color='blue', dash='dot'),
+                    annotation_text='Entry',
+                    annotation_position='top left'
+                )
+            if target is not None and target > 0:
+                fig.add_hline(
+                    y=target,
+                    line=dict(color='green', dash='dash'),
+                    annotation_text='Target',
+                    annotation_position='top right'
+                )
+            if stop is not None and stop > 0:
+                fig.add_hline(
+                    y=stop,
+                    line=dict(color='red', dash='dash'),
+                    annotation_text='Stop',
+                    annotation_position='bottom right'
+                )
 
-fig.update_layout(title=f"{symbol} Chart", height=300)
-st.plotly_chart(fig, use_container_width=True)(fig, use_container_width=True)
-
-# --- 6️⃣ Summary of Trades by Symbol ---
-st.subheader("📌 Trade Summary by Symbol")
-if df.empty:
-    st.info("No trades logged yet.")
-else:
-    fig_summary = df.copy()
-    fig_summary['Profit/Loss'] = df['Profit/Loss'] if 'Profit/Loss' in df.columns else df.apply(
-        lambda row: round((row['Exit Price'] - row['Entry Price']), 2) if row['Trade Type'] in ['Call','Breakout'] else round((row['Entry Price']-row['Exit Price']),2), axis=1
-    )
-    grouped = fig_summary.groupby('Symbol').agg(
-        Total_Trades=('Symbol','count'),
-        Wins=('Actual Result', lambda x: (x=='Win').sum()),
-        Losses=('Actual Result', lambda x: (x=='Loss').sum()),
-        Breakevens=('Actual Result', lambda x: (x=='Breakeven').sum()),
-        Net_PL=('Profit/Loss','sum')
-    )
-    for symbol, row in grouped.iterrows():
-        st.markdown(f"### {symbol}")
-        st.write(f"Total Trades: {row['Total_Trades']}")
-        st.write(f"Wins: {row['Wins']}")
-        st.write(f"Losses: {row['Losses']}")
-        st.write(f"Breakevens: {row['Breakevens']}")
-        st.write(f"Net P/L: {round(row['Net_PL'],2)}")
-
-# --- Download CSV ---
-csv = df.to_csv(index=False).encode('utf-8')
-st.download_button("📥 Download All Trades", data=csv, file_name='trades.csv', mime='text/csv')
+            fig.update_layout(title=f"{symbol} Chart", height=300)
+            st.plotly_chart(fig, use_container_width=True)
