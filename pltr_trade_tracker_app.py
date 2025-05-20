@@ -6,11 +6,10 @@ import plotly.graph_objs as go
 import requests
 from streamlit_autorefresh import st_autorefresh
 
-# 🔒 Pushover credentials (set in Streamlit Secrets)
-# In Streamlit Cloud: Settings → Secrets
-# Add these two lines:
-# pushover_user_key = "YOUR_USER_KEY"
-# pushover_api_token = "YOUR_APP_TOKEN"
+# 🔒 Pushover credentials are loaded from Streamlit Secrets
+#   Configure these in your Streamlit Cloud settings under "Secrets":
+#   pushover_user_key  = "<your Pushover User Key>"
+#   pushover_api_token = "<your Pushover API Token>"
 PUSHOVER_USER_KEY = st.secrets.get("pushover_user_key", "")
 PUSHOVER_API_TOKEN = st.secrets.get("pushover_api_token", "")
 
@@ -52,6 +51,35 @@ def headline_sentiment_score(headlines):
         return 0.0
     scores = [sia.polarity_scores(h)["compound"] for h in headlines]
     return sum(scores) / len(scores)
+
+# --- 🛠️ 6️⃣ Monte Carlo & Black-Scholes for Hit Probabilities ---
+import numpy as np
+from scipy.stats import norm
+
+@st.cache_data
+def mc_hit_probability(S0, target, T_days, vol_annual, n_sims=10000, n_steps=100):
+    """
+    Estimate probability that a GBM path starting at S0
+    hits `target` within T_days trading days.
+    """
+    dt = (T_days/252) / n_steps
+    drift = -0.5 * vol_annual**2 * dt
+    diffusion = vol_annual * np.sqrt(dt)
+    hits = 0
+    for _ in range(n_sims):
+        increments = drift + diffusion * np.random.randn(n_steps)
+        path = S0 * np.exp(np.cumsum(increments))
+        if path.max() >= target:
+            hits += 1
+    return hits / n_sims
+
+@st.cache_data
+def bs_itm_prob(S0, K, T_years, vol):
+    """
+    Compute Black–Scholes probability S_T > K at expiry T_years.
+    """
+    d2 = (np.log(S0/K) - 0.5 * vol**2 * T_years) / (vol * np.sqrt(T_years))
+    return norm.cdf(d2)
 
 
 # --- Streamlit Page Setup ---
