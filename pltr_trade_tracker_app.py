@@ -83,7 +83,7 @@ def bs_itm_prob(S0, K, T_years, vol):
 
 
 # --- Streamlit Page Setup ---
-st.set_page_config(page_title="PLTR Day Trade Tracker", layout="wide")
+st.set_page_config(page_title="Day Trade Tracker with Charts & Alerts", layout="wide")
 
 # --- Hard Stop Control ---
 # Use query_params API for persistence
@@ -124,7 +124,7 @@ if auto_refresh:
     st_autorefresh(interval=15_000, limit=None, key="refresh_timer")
 
 # --- Main Page ---
-st.title("📈 PLTR Day Trade Tracker with Charts & Alerts")
+st.title("📈 Day Trade Tracker with Charts & Alerts"))
 
 # --- 1️⃣ Load or Initialize Trade Data ---
 @st.cache_data
@@ -139,12 +139,8 @@ df = load_data()
 
 # --- 2️⃣ Symbol Selection & Trade Logging Form ---
 # Enter symbols to track
-symbol_input = st.text_input(
-    "Enter symbols to track (comma-separated)",
-    value="PLTR,TSLA,AAPL",
-    help="Type ticker symbols separated by commas."
-)
-symbols = [s.strip().upper() for s in symbol_input.split(",") if s.strip()]
+symbols_input = st.text_input("Enter symbols to track (comma-separated):", value="")
+symbols = [s.strip().upper() for s in symbols_input.split(",") if s.strip()]
 
 with st.form("trade_form"):
     st.subheader("Log a New Trade")
