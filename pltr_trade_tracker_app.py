@@ -81,6 +81,7 @@ def bs_itm_prob(S0, K, T_years, vol):
     d2 = (np.log(S0/K) - 0.5 * vol**2 * T_years) / (vol * np.sqrt(T_years))
     return norm.cdf(d2)
 
+
 # --- Streamlit Page Setup ---
 st.set_page_config(page_title="Day Trade Tracker with Charts & Alerts", layout="wide")
 
@@ -99,6 +100,7 @@ if pause_all:
     st.stop()
 else:
     st.query_params = {"pause": ["0"]}
+
 
 # --- Sidebar Controls (always visible) ---
 with st.sidebar:
@@ -174,7 +176,7 @@ with st.form("trade_form"):
         df = pd.concat([df, new_row], ignore_index=True)
         st.success("Trade added successfully!")
 
-# --- 3️⃣ Fetch & Compute Indicators for Each Symbol ---
+# --- 3️⃣ Fetch & Compute Indicators for Each Symbol --- & Compute Indicators for Each Symbol ---
 for symbol in symbols:
     st.markdown(f"## 📊 {symbol} Analysis")
     ticker = yf.Ticker(symbol)
@@ -249,7 +251,7 @@ for symbol in symbols:
     elif sentiment < -0.2:
         confidence = max(0, confidence - 10)
 
-    # --- 5️⃣ Strategy Logic & Chart ---
+# --- 5️⃣ Strategy Logic & Chart --- & Chart --- & Chart ---
     if not auto_refresh:
         st.info("⏸ Strategy logic is paused while Auto-Refresh is off.")
     else:
@@ -308,11 +310,11 @@ for symbol in symbols:
             fig.add_trace(go.Scatter(x=history.index, y=history['EMA9'], mode='lines', name='EMA9'))
             fig.add_trace(go.Scatter(x=history.index, y=history['EMA21'], mode='lines', name='EMA21'))
             if entry:
-                fig.add_hline(y=entry, line=dict(color='blue', dash='dot'), annotation_text='Entry', annotation_position='top left')
-            if target:
-                fig.add_hline(y=target, line=dict(color='green', dash='dash'), annotation_text='Target', annotation_position='top right')
-            if stop:
-                fig.add_hline(y=stop, line=dict(color='red', dash='dash'), annotation_text='Stop', annotation_position='bottom right')
+                fig.add_hline(y=entry, line=dict(color='blue', dash='dot'), annotation_text='Entry', annotation_position='top left'), annotation_text='Entry', annotation_position='top left')
+if target:
+                fig.add_hline(y=target, line=dict(color='green', dash='dash'), annotation_text='Target', annotation_position='top right'), annotation_text='Target', annotation_position='top right')
+if stop:
+                fig.add_hline(y=stop, line=dict(color='red', dash='dash'), annotation_text='Stop', annotation_position='bottom right'), annotation_text='Stop', annotation_position='bottom right')
             fig.update_layout(title=f"{symbol} Chart", height=300)
             st.plotly_chart(fig, use_container_width=True)
 
