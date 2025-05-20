@@ -124,7 +124,7 @@ if auto_refresh:
     st_autorefresh(interval=15_000, limit=None, key="refresh_timer")
 
 # --- Main Page ---
-st.title("📈 Day Trade Tracker with Charts & Alerts"))
+st.title("📈 Day Trade Tracker with Charts & Alerts")
 
 # --- 1️⃣ Load or Initialize Trade Data ---
 @st.cache_data
