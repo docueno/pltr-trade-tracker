@@ -291,10 +291,13 @@ for symbol in symbols:
             st.write(f"📊 Volume: {vol_val} vs AvgVol: {avg_vol_val}")
 
             # --- 6️⃣ Probability Analysis ---
-            # Get target price and days to expiration from the latest trade for this symbol
+            # Get target price, entry, stop, and days to expiration from the latest trade for this symbol
             symbol_trades = df[df['Symbol'] == symbol]
             target = symbol_trades['Target Price'].iloc[-1] if not symbol_trades.empty else None
+            entry = symbol_trades['Entry Price'].iloc[-1] if not symbol_trades.empty else None
+            stop = symbol_trades['Stop Loss'].iloc[-1] if not symbol_trades.empty else None
             days_to_expiration = symbol_trades['Days to Expiration'].iloc[-1] if not symbol_trades.empty else 5
+
             if target is not None and not np.isnan(vol_annual):
                 prob_mc = mc_hit_probability(current_price, target, days_to_expiration, vol_annual)
                 prob_bs = bs_itm_prob(current_price, target, days_to_expiration/252, vol_annual)
@@ -323,9 +326,13 @@ for symbol in symbols:
             )])
             fig.add_trace(go.Scatter(x=history.index, y=history['EMA9'], mode='lines', name='EMA9'))
             fig.add_trace(go.Scatter(x=history.index, y=history['EMA21'], mode='lines', name='EMA21'))
-            fig.add_hline(y=entry, line=dict(color='blue', dash='dot'), annotation_text='Entry', annotation_position='top left')
-            fig.add_hline(y=target, line=dict(color='green', dash='dash'), annotation_text='Target', annotation_position='top right')
-            fig.add_hline(y=stop, line=dict(color='red', dash='dash'), annotation_text='Stop', annotation_position='bottom right')
+            # Only add hlines if valid values exist
+            if entry is not None and not np.isnan(entry):
+                fig.add_hline(y=entry, line=dict(color='blue', dash='dot'), annotation_text='Entry', annotation_position='top left')
+            if target is not None and not np.isnan(target):
+                fig.add_hline(y=target, line=dict(color='green', dash='dash'), annotation_text='Target', annotation_position='top right')
+            if stop is not None and not np.isnan(stop):
+                fig.add_hline(y=stop, line=dict(color='red', dash='dash'), annotation_text='Stop', annotation_position='bottom right')
             fig.update_layout(title=f"{symbol} Chart", height=300)
             st.plotly_chart(fig, use_container_width=True)
 
