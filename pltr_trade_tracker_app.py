@@ -302,21 +302,39 @@ for symbol in symbols:
                 st.session_state.last_trend_bias = trend_bias
 
             # Chart with markers
-            fig = go.Figure(data=[go.Candlestick(
-                x=history.index,
-                open=history['Open'], high=history['High'],
-                low=history['Low'], close=history['Close']
-            )])
-            fig.add_trace(go.Scatter(x=history.index, y=history['EMA9'], mode='lines', name='EMA9'))
-            fig.add_trace(go.Scatter(x=history.index, y=history['EMA21'], mode='lines', name='EMA21'))
-            if entry:
-                fig.add_hline(y=entry, line=dict(color='blue', dash='dot'), annotation_text='Entry', annotation_position='top left'), annotation_text='Entry', annotation_position='top left')
+fig = go.Figure(data=[go.Candlestick(
+    x=history.index,
+    open=history['Open'], high=history['High'],
+    low=history['Low'], close=history['Close']
+)])
+fig.add_trace(go.Scatter(x=history.index, y=history['EMA9'], mode='lines', name='EMA9'))
+fig.add_trace(go.Scatter(x=history.index, y=history['EMA21'], mode='lines', name='EMA21'))
+
+if entry:
+    fig.add_hline(
+        y=entry,
+        line=dict(color='blue', dash='dot'),
+        annotation_text='Entry',
+        annotation_position='top left'
+    )
 if target:
-                fig.add_hline(y=target, line=dict(color='green', dash='dash'), annotation_text='Target', annotation_position='top right'), annotation_text='Target', annotation_position='top right')
+    fig.add_hline(
+        y=target,
+        line=dict(color='green', dash='dash'),
+        annotation_text='Target',
+        annotation_position='top right'
+    )
 if stop:
-                fig.add_hline(y=stop, line=dict(color='red', dash='dash'), annotation_text='Stop', annotation_position='bottom right'), annotation_text='Stop', annotation_position='bottom right')
-            fig.update_layout(title=f"{symbol} Chart", height=300)
-            st.plotly_chart(fig, use_container_width=True)
+    fig.add_hline(
+        y=stop,
+        line=dict(color='red', dash='dash'),
+        annotation_text='Stop',
+        annotation_position='bottom right'
+    )
+
+fig.update_layout(title=f"{symbol} Chart", height=300)
+st.plotly_chart(fig, use_container_width=True)
+
 
 # --- 6️⃣ Summary of Trades by Symbol ---
 st.subheader("📌 Trade Summary by Symbol")
