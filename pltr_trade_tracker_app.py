@@ -310,21 +310,22 @@ fig = go.Figure(data=[go.Candlestick(
 fig.add_trace(go.Scatter(x=history.index, y=history['EMA9'], mode='lines', name='EMA9'))
 fig.add_trace(go.Scatter(x=history.index, y=history['EMA21'], mode='lines', name='EMA21'))
 
-if entry:
+# Overlay entry/target/stop if set
+if entry is not None and entry > 0:
     fig.add_hline(
         y=entry,
         line=dict(color='blue', dash='dot'),
         annotation_text='Entry',
         annotation_position='top left'
     )
-if target:
+if target is not None and target > 0:
     fig.add_hline(
         y=target,
         line=dict(color='green', dash='dash'),
         annotation_text='Target',
         annotation_position='top right'
     )
-if stop:
+if stop is not None and stop > 0:
     fig.add_hline(
         y=stop,
         line=dict(color='red', dash='dash'),
@@ -333,8 +334,7 @@ if stop:
     )
 
 fig.update_layout(title=f"{symbol} Chart", height=300)
-st.plotly_chart(fig, use_container_width=True)
-
+st.plotly_chart(fig, use_container_width=True)(fig, use_container_width=True)
 
 # --- 6️⃣ Summary of Trades by Symbol ---
 st.subheader("📌 Trade Summary by Symbol")
