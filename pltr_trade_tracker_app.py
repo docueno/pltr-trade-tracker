@@ -5,6 +5,8 @@ import yfinance as yf
 import plotly.graph_objs as go
 import requests
 from streamlit_autorefresh import st_autorefresh
+import numpy as np
+from scipy.stats import norm
 
 # 🔒 Pushover credentials are loaded from Streamlit Secrets
 #   Configure these in your Streamlit Cloud settings under "Secrets":
@@ -52,10 +54,7 @@ def headline_sentiment_score(headlines):
     scores = [sia.polarity_scores(h)["compound"] for h in headlines]
     return sum(scores) / len(scores)
 
-# --- 🛠️ 6️⃣ Monte Carlo & Black-Scholes for Hit Probabilities ---
-import numpy as np
-from scipy.stats import norm
-
+# --- 🛠️ Monte Carlo & Black-Scholes for Hit Probabilities ---
 @st.cache_data
 def mc_hit_probability(S0, target, T_days, vol_annual, n_sims=10000, n_steps=100):
     """
@@ -81,7 +80,6 @@ def bs_itm_prob(S0, K, T_years, vol):
     d2 = (np.log(S0/K) - 0.5 * vol**2 * T_years) / (vol * np.sqrt(T_years))
     return norm.cdf(d2)
 
-
 # --- Streamlit Page Setup ---
 st.set_page_config(page_title="Day Trade Tracker with Charts & Alerts", layout="wide")
 
@@ -100,7 +98,6 @@ if pause_all:
     st.stop()
 else:
     st.query_params = {"pause": ["0"]}
-
 
 # --- Sidebar Controls (always visible) ---
 with st.sidebar:
@@ -131,7 +128,7 @@ st.title("📈 Day Trade Tracker with Charts & Alerts")
 def load_data():
     return pd.DataFrame(columns=[
         "Symbol", "Date", "Trade Type", "Entry Price", "Exit Price",
-        "Stop Loss", "Target Price", "Actual Result",
+        "Stop Loss", "Target Price", "Days to Expiration", "Actual Result",
         "Confidence", "Notes"
     ])
 
@@ -139,12 +136,8 @@ df = load_data()
 
 # --- 2️⃣ Symbol Selection & Trade Logging Form ---
 # Enter symbols to track
-symbol_input = st.text_input(
-    "Enter symbols to track (comma-separated)",
-    value="PLTR,TSLA,AAPL",
-    help="Type ticker symbols separated by commas."
-)
-symbols = [s.strip().upper() for s in symbol_input.split(",") if s.strip()]
+symbols_input = st.text_input("Enter symbols to track (comma-separated):", value="")
+symbols = [s.strip().upper() for s in symbols_input.split(",") if s.strip()]
 
 with st.form("trade_form"):
     st.subheader("Log a New Trade")
@@ -155,6 +148,7 @@ with st.form("trade_form"):
     exit_price = st.number_input("Exit Price", format="%.2f")
     stop = st.number_input("Stop Loss", format="%.2f")
     target = st.number_input("Target Price", format="%.2f")
+    days_to_expiration = st.number_input("Days to Expiration", min_value=1, max_value=252, value=5)
     result = st.selectbox("Trade Result", ["Pending", "Win", "Loss", "Breakeven"])
     confidence = st.slider("Confidence Level", 0, 100, 50)
     notes = st.text_area("Notes")
@@ -169,6 +163,7 @@ with st.form("trade_form"):
             "Exit Price": exit_price,
             "Stop Loss": stop,
             "Target Price": target,
+            "Days to Expiration": days_to_expiration,
             "Actual Result": result,
             "Confidence": confidence,
             "Notes": notes
@@ -176,7 +171,7 @@ with st.form("trade_form"):
         df = pd.concat([df, new_row], ignore_index=True)
         st.success("Trade added successfully!")
 
-# --- 3️⃣ Fetch & Compute Indicators for Each Symbol --- & Compute Indicators for Each Symbol ---
+# --- 3️⃣ Fetch & Compute Indicators for Each Symbol ---
 for symbol in symbols:
     st.markdown(f"## 📊 {symbol} Analysis")
     ticker = yf.Ticker(symbol)
@@ -205,21 +200,21 @@ for symbol in symbols:
     # Compute average volume
     history['AvgVol'] = history['Volume'].rolling(20).mean()
 
+    # Compute historical volatility
+    log_returns = np.log(history['Close'] / history['Close'].shift(1))
+    vol_annual = np.std(log_returns) * np.sqrt(252) if not log_returns.empty else 0.3  # Default to 30% if insufficient data
+
     # --- 4️⃣ Debug Info ---
     # 🧠 Pattern Recognition
-    # Last close price
     last_close = history['Close'].iloc[-1]
-    # Breakout scan
     prior_high = history['High'].rolling(window=20).max().shift(1)
     breakout = last_close > prior_high.iloc[-1] if not prior_high.empty else False
-    # Cup and handle detection (naive)
     window = history['Close'].tail(30)
     cup = False
     if len(window) == 30:
         trough_idx = window.idxmin()
         trough_pos = list(window.index).index(trough_idx)
         cup = (window.iloc[0] > window.min() < window.iloc[-1]) and (10 <= trough_pos <= 20)
-    # Triangle detection (naive)
     highs = history['High'].tail(20)
     lows = history['Low'].tail(20)
     rng = highs - lows
@@ -241,17 +236,16 @@ for symbol in symbols:
     st.write("Shape:", history.shape)
     st.write("Columns:", history.columns.tolist())
 
-    # 📰 5️⃣ News Sentiment Analysis
+    # 📰 News Sentiment Analysis
     headlines = get_headlines(symbol)
     sentiment = headline_sentiment_score(headlines)
     st.write(f"📰 News Sentiment (avg score): {sentiment:.2f}")
-    # Optionally adjust confidence based on sentiment
     if sentiment > 0.2:
         confidence = min(100, confidence + 10)
     elif sentiment < -0.2:
         confidence = max(0, confidence - 10)
 
-# --- 5️⃣ Strategy Logic & Chart --- & Chart --- & Chart ---
+    # --- 5️⃣ Strategy Logic & Chart ---
     if not auto_refresh:
         st.info("⏸ Strategy logic is paused while Auto-Refresh is off.")
     else:
@@ -296,12 +290,32 @@ for symbol in symbols:
             st.write(f"📊 MACD: {macd_val} vs Signal: {signal_val}")
             st.write(f"📊 Volume: {vol_val} vs AvgVol: {avg_vol_val}")
 
+            # --- 6️⃣ Probability Analysis ---
+            # Get target price and days to expiration from the latest trade for this symbol
+            symbol_trades = df[df['Symbol'] == symbol]
+            target = symbol_trades['Target Price'].iloc[-1] if not symbol_trades.empty else None
+            days_to_expiration = symbol_trades['Days to Expiration'].iloc[-1] if not symbol_trades.empty else 5
+            if target is not None and not np.isnan(vol_annual):
+                prob_mc = mc_hit_probability(current_price, target, days_to_expiration, vol_annual)
+                prob_bs = bs_itm_prob(current_price, target, days_to_expiration/252, vol_annual)
+                st.subheader(f"📈 Probability Analysis for {symbol}")
+                st.write(f"Monte Carlo Probability of hitting ${target:.2f} within {days_to_expiration} days: {prob_mc*100:.2f}%")
+                st.write(f"Black-Scholes Probability of being above ${target:.2f} at expiration: {prob_bs*100:.2f}%")
+                # Send notification if probability is high
+                if prob_mc > 0.7 or prob_bs > 0.7:
+                    send_pushover_notification(
+                        f"High Probability Alert for {symbol}",
+                        f"High chance of hitting ${target:.2f}: MC {prob_mc*100:.2f}%, BS {prob_bs*100:.2f}%"
+                    )
+            else:
+                st.warning("⚠️ No target price or valid volatility data available for probability analysis.")
+
             # Push notification on trend change
             if 'last_trend_bias' not in st.session_state or st.session_state.last_trend_bias != trend_bias:
                 send_pushover_notification("Strategy Update", f"{symbol} trend: {trend_bias} at ${current_price:.2f}")
                 st.session_state.last_trend_bias = trend_bias
 
-                        # Chart with markers
+            # Chart with markers
             fig = go.Figure(data=[go.Candlestick(
                 x=history.index,
                 open=history['Open'], high=history['High'],
@@ -309,29 +323,36 @@ for symbol in symbols:
             )])
             fig.add_trace(go.Scatter(x=history.index, y=history['EMA9'], mode='lines', name='EMA9'))
             fig.add_trace(go.Scatter(x=history.index, y=history['EMA21'], mode='lines', name='EMA21'))
-
-            # Overlay entry/target/stop if set
-            if entry is not None and entry > 0:
-                fig.add_hline(
-                    y=entry,
-                    line=dict(color='blue', dash='dot'),
-                    annotation_text='Entry',
-                    annotation_position='top left'
-                )
-            if target is not None and target > 0:
-                fig.add_hline(
-                    y=target,
-                    line=dict(color='green', dash='dash'),
-                    annotation_text='Target',
-                    annotation_position='top right'
-                )
-            if stop is not None and stop > 0:
-                fig.add_hline(
-                    y=stop,
-                    line=dict(color='red', dash='dash'),
-                    annotation_text='Stop',
-                    annotation_position='bottom right'
-                )
-
+            fig.add_hline(y=entry, line=dict(color='blue', dash='dot'), annotation_text='Entry', annotation_position='top left')
+            fig.add_hline(y=target, line=dict(color='green', dash='dash'), annotation_text='Target', annotation_position='top right')
+            fig.add_hline(y=stop, line=dict(color='red', dash='dash'), annotation_text='Stop', annotation_position='bottom right')
             fig.update_layout(title=f"{symbol} Chart", height=300)
             st.plotly_chart(fig, use_container_width=True)
+
+# --- 7️⃣ Summary of Trades by Symbol ---
+st.subheader("📌 Trade Summary by Symbol")
+if df.empty:
+    st.info("No trades logged yet.")
+else:
+    fig_summary = df.copy()
+    fig_summary['Profit/Loss'] = fig_summary.apply(
+        lambda row: round((row['Exit Price'] - row['Entry Price']), 2) if row['Trade Type'] in ['Call','Breakout'] else round((row['Entry Price']-row['Exit Price']),2), axis=1
+    )
+    grouped = fig_summary.groupby('Symbol').agg(
+        Total_Trades=('Symbol','count'),
+        Wins=('Actual Result', lambda x: (x=='Win').sum()),
+        Losses=('Actual Result', lambda x: (x=='Loss').sum()),
+        Breakevens=('Actual Result', lambda x: (x=='Breakeven').sum()),
+        Net_PL=('Profit/Loss','sum')
+    )
+    for symbol, row in grouped.iterrows():
+        st.markdown(f"### {symbol}")
+        st.write(f"Total Trades: {row['Total_Trades']}")
+        st.write(f"Wins: {row['Wins']}")
+        st.write(f"Losses: {row['Losses']}")
+        st.write(f"Breakevens: {row['Breakevens']}")
+        st.write(f"Net P/L: {round(row['Net_PL'],2)}")
+
+# --- Download CSV ---
+csv = df.to_csv(index=False).encode('utf-8')
+st.download_button("📥 Download All Trades", data=csv, file_name='trades.csv', mime='text/csv')
