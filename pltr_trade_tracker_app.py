@@ -143,7 +143,7 @@ if 'prediction_df' not in st.session_state:
         st.session_state.prediction_df = pd.read_csv(prediction_file)
     else:
         st.session_state.prediction_df = pd.DataFrame(columns=[
-            "Symbol", "Timestamp", "Target Price", "Days to Expiration",
+            "Symbol", "Timestamp", "Trade Type", "Target Price", "Days to Expiration",
             "Monte Carlo Probability", "Black-Scholes Probability"
         ])
 
@@ -310,11 +310,12 @@ for symbol in symbols:
             st.write(f"📊 Volume: {vol_val} vs AvgVol: {avg_vol_val}")
 
             # --- 7️⃣ Probability Analysis ---
-            # Get target price, entry, stop, and days to expiration from the latest trade for this symbol
+            # Get target price, entry, stop, trade type, and days to expiration from the latest trade for this symbol
             symbol_trades = df[df['Symbol'] == symbol]
             target = symbol_trades['Target Price'].iloc[-1] if not symbol_trades.empty else None
             entry = symbol_trades['Entry Price'].iloc[-1] if not symbol_trades.empty else None
             stop = symbol_trades['Stop Loss'].iloc[-1] if not symbol_trades.empty else None
+            trade_type = symbol_trades['Trade Type'].iloc[-1] if not symbol_trades.empty else None
             days_to_expiration = symbol_trades['Days to Expiration'].iloc[-1] if not symbol_trades.empty else 5
 
             # Initialize latest_probs for this symbol if not exists
@@ -343,6 +344,7 @@ for symbol in symbols:
                 new_prediction = pd.DataFrame([{
                     "Symbol": symbol,
                     "Timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                    "Trade Type": trade_type,
                     "Target Price": target,
                     "Days to Expiration": days_to_expiration,
                     "Monte Carlo Probability": prob_mc * 100,
@@ -358,7 +360,7 @@ for symbol in symbols:
                 if prob_mc > 0.7 or prob_bs > 0.7:
                     send_pushover_notification(
                         f"High Probability Alert for {symbol}",
-                        f"High chance of hitting ${target:.2f}: MC {prob_mc*100:.2f}%, BS {prob_bs*100:.2f}%"
+                        f"High chance of hitting ${target:.2f} ({trade_type}): MC {prob_mc*100:.2f}%, BS {prob_bs*100:.2f}%"
                     )
 
             # Display latest probabilities (persistent)
@@ -404,7 +406,7 @@ else:
             st.markdown(f"### {symbol}")
             st.dataframe(
                 symbol_preds.sort_values(by="Timestamp", ascending=False)[[
-                    "Timestamp", "Target Price", "Days to Expiration",
+                    "Timestamp", "Trade Type", "Target Price", "Days to Expiration",
                     "Monte Carlo Probability", "Black-Scholes Probability"
                 ]].style.format({
                     "Target Price": "{:.2f}",
