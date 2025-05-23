@@ -7,6 +7,7 @@ import requests
 from streamlit_autorefresh import st_autorefresh
 import numpy as np
 from scipy.stats import norm
+import os
 
 # 🔒 Pushover credentials are loaded from Streamlit Secrets
 #   Configure these in your Streamlit Cloud settings under "Secrets":
@@ -134,7 +135,19 @@ def load_data():
 
 df = load_data()
 
-# --- 2️⃣ Symbol Selection & Trade Logging Form ---
+# --- 2️⃣ Initialize Prediction History ---
+# Load or initialize prediction history DataFrame
+prediction_file = "prediction_history.csv"
+if 'prediction_df' not in st.session_state:
+    if os.path.exists(prediction_file):
+        st.session_state.prediction_df = pd.read_csv(prediction_file)
+    else:
+        st.session_state.prediction_df = pd.DataFrame(columns=[
+            "Symbol", "Timestamp", "Target Price", "Days to Expiration",
+            "Monte Carlo Probability", "Black-Scholes Probability"
+        ])
+
+# --- 3️⃣ Symbol Selection & Trade Logging Form ---
 # Enter symbols to track
 symbols_input = st.text_input("Enter symbols to track (comma-separated):", value="")
 symbols = [s.strip().upper() for s in symbols_input.split(",") if s.strip()]
@@ -171,7 +184,11 @@ with st.form("trade_form"):
         df = pd.concat([df, new_row], ignore_index=True)
         st.success("Trade added successfully!")
 
-# --- 3️⃣ Fetch & Compute Indicators for Each Symbol ---
+# --- 4️⃣ Fetch & Compute Indicators for Each Symbol ---
+# Initialize latest probabilities in session state
+if 'latest_probs' not in st.session_state:
+    st.session_state.latest_probs = {}
+
 for symbol in symbols:
     st.markdown(f"## 📊 {symbol} Analysis")
     ticker = yf.Ticker(symbol)
@@ -203,8 +220,10 @@ for symbol in symbols:
     # Compute historical volatility
     log_returns = np.log(history['Close'] / history['Close'].shift(1))
     vol_annual = np.std(log_returns) * np.sqrt(252) if not log_returns.empty else 0.3  # Default to 30% if insufficient data
+    if log_returns.empty:
+        st.warning(f"⚠️ Insufficient data for volatility calculation for {symbol}. Using default 30%.")
 
-    # --- 4️⃣ Debug Info ---
+    # --- 5️⃣ Debug Info ---
     # 🧠 Pattern Recognition
     last_close = history['Close'].iloc[-1]
     prior_high = history['High'].rolling(window=20).max().shift(1)
@@ -245,7 +264,7 @@ for symbol in symbols:
     elif sentiment < -0.2:
         confidence = max(0, confidence - 10)
 
-    # --- 5️⃣ Strategy Logic & Chart ---
+    # --- 6️⃣ Strategy Logic & Chart ---
     if not auto_refresh:
         st.info("⏸ Strategy logic is paused while Auto-Refresh is off.")
     else:
@@ -290,7 +309,7 @@ for symbol in symbols:
             st.write(f"📊 MACD: {macd_val} vs Signal: {signal_val}")
             st.write(f"📊 Volume: {vol_val} vs AvgVol: {avg_vol_val}")
 
-            # --- 6️⃣ Probability Analysis ---
+            # --- 7️⃣ Probability Analysis ---
             # Get target price, entry, stop, and days to expiration from the latest trade for this symbol
             symbol_trades = df[df['Symbol'] == symbol]
             target = symbol_trades['Target Price'].iloc[-1] if not symbol_trades.empty else None
@@ -298,18 +317,56 @@ for symbol in symbols:
             stop = symbol_trades['Stop Loss'].iloc[-1] if not symbol_trades.empty else None
             days_to_expiration = symbol_trades['Days to Expiration'].iloc[-1] if not symbol_trades.empty else 5
 
+            # Initialize latest_probs for this symbol if not exists
+            if symbol not in st.session_state.latest_probs:
+                st.session_state.latest_probs[symbol] = {
+                    "target": None,
+                    "days_to_expiration": None,
+                    "prob_mc": None,
+                    "prob_bs": None
+                }
+
+            # Compute probabilities if data is valid
             if target is not None and not np.isnan(vol_annual):
                 prob_mc = mc_hit_probability(current_price, target, days_to_expiration, vol_annual)
                 prob_bs = bs_itm_prob(current_price, target, days_to_expiration/252, vol_annual)
-                st.subheader(f"📈 Probability Analysis for {symbol}")
-                st.write(f"Monte Carlo Probability of hitting ${target:.2f} within {days_to_expiration} days: {prob_mc*100:.2f}%")
-                st.write(f"Black-Scholes Probability of being above ${target:.2f} at expiration: {prob_bs*100:.2f}%")
+                
+                # Update latest probabilities
+                st.session_state.latest_probs[symbol] = {
+                    "target": target,
+                    "days_to_expiration": days_to_expiration,
+                    "prob_mc": prob_mc,
+                    "prob_bs": prob_bs
+                }
+
+                # Append to prediction history
+                new_prediction = pd.DataFrame([{
+                    "Symbol": symbol,
+                    "Timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                    "Target Price": target,
+                    "Days to Expiration": days_to_expiration,
+                    "Monte Carlo Probability": prob_mc * 100,
+                    "Black-Scholes Probability": prob_bs * 100
+                }])
+                st.session_state.prediction_df = pd.concat(
+                    [st.session_state.prediction_df, new_prediction], ignore_index=True
+                )
+                # Save to CSV
+                st.session_state.prediction_df.to_csv(prediction_file, index=False)
+
                 # Send notification if probability is high
                 if prob_mc > 0.7 or prob_bs > 0.7:
                     send_pushover_notification(
                         f"High Probability Alert for {symbol}",
                         f"High chance of hitting ${target:.2f}: MC {prob_mc*100:.2f}%, BS {prob_bs*100:.2f}%"
                     )
+
+            # Display latest probabilities (persistent)
+            st.subheader(f"📈 Probability Analysis for {symbol}")
+            latest_prob = st.session_state.latest_probs.get(symbol, {})
+            if latest_prob["target"] is not None:
+                st.write(f"Monte Carlo Probability of hitting ${latest_prob['target']:.2f} within {latest_prob['days_to_expiration']} days: {latest_prob['prob_mc']*100:.2f}%")
+                st.write(f"Black-Scholes Probability of being above ${latest_prob['target']:.2f} at expiration: {latest_prob['prob_bs']*100:.2f}%")
             else:
                 st.warning("⚠️ No target price or valid volatility data available for probability analysis.")
 
@@ -336,7 +393,27 @@ for symbol in symbols:
             fig.update_layout(title=f"{symbol} Chart", height=300)
             st.plotly_chart(fig, use_container_width=True)
 
-# --- 7️⃣ Summary of Trades by Symbol ---
+# --- 8️⃣ Prediction History ---
+st.subheader("📜 Prediction History")
+if st.session_state.prediction_df.empty:
+    st.info("No predictions logged yet.")
+else:
+    for symbol in symbols:
+        symbol_preds = st.session_state.prediction_df[st.session_state.prediction_df['Symbol'] == symbol]
+        if not symbol_preds.empty:
+            st.markdown(f"### {symbol}")
+            st.dataframe(
+                symbol_preds.sort_values(by="Timestamp", ascending=False)[[
+                    "Timestamp", "Target Price", "Days to Expiration",
+                    "Monte Carlo Probability", "Black-Scholes Probability"
+                ]].style.format({
+                    "Target Price": "{:.2f}",
+                    "Monte Carlo Probability": "{:.2f}%",
+                    "Black-Scholes Probability": "{:.2f}%"
+                })
+            )
+
+# --- 9️⃣ Summary of Trades by Symbol ---
 st.subheader("📌 Trade Summary by Symbol")
 if df.empty:
     st.info("No trades logged yet.")
@@ -363,3 +440,7 @@ else:
 # --- Download CSV ---
 csv = df.to_csv(index=False).encode('utf-8')
 st.download_button("📥 Download All Trades", data=csv, file_name='trades.csv', mime='text/csv')
+
+# Download prediction history
+pred_csv = st.session_state.prediction_df.to_csv(index=False).encode('utf-8')
+st.download_button("📥 Download Prediction History", data=pred_csv, file_name='prediction_history.csv', mime='text/csv')
