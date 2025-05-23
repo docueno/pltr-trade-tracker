@@ -6,5 +6,7 @@ requests
 streamlit-autorefresh
 numpy
 scipy
-vaderSentiment
 pytz
+praw
+vaderSentiment
+pygooglenews
