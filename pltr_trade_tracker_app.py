@@ -130,7 +130,7 @@ st.title("📈 Day Trade Tracker with Charts & Alerts")
 
 # Market status message
 if not is_market_open():
-    st.info("⚠️ Market is currently closed (outside 9:30 AM - 4:00 PM EDT). Pattern recognition and indicators are based on the latest available data.")
+    st.info("⚠️ Market is currently closed (outside 9:30 AM - 4:00 PM EDT). Recommendations are based on the latest available data.")
 
 # --- 1️⃣ Load or Initialize Trade Data ---
 @st.cache_data
@@ -356,7 +356,7 @@ for symbol in symbols:
 
                 new_prediction = pd.DataFrame([{
                     "Symbol": symbol,
-                    "Timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                    "Timestamp": datetime.now().strftime('%Y-%m-%d %H:M:%S'),
                     "Trade Type": trade_type,
                     "Target Price": target,
                     "Days to Expiration": days_to_expiration,
@@ -387,6 +387,65 @@ for symbol in symbols:
                 send_pushover_notification("Strategy Update", f"{symbol} trend: {trend_bias} at ${current_price:.2f}")
                 st.session_state.last_trend_bias = trend_bias
 
+            # --- 8️⃣ Contract Suggestion ---
+            if latest is not None and not np.isnan(current_price):
+                # Calculate target based on pattern
+                if cup:
+                    cup_high = window.iloc[0]  # Left rim
+                    cup_low = window.min()     # Bottom
+                    cup_depth = cup_high - cup_low
+                    target_price = round(cup_high + cup_depth, 2) if trend_bias.startswith("Bullish") else round(cup_low - cup_depth, 2)
+                    contract_type = "CALL" if trend_bias.startswith("Bullish") else "PUT"
+                    expiration_date = (datetime.now() + pd.Timedelta(days=days_to_expiration)).strftime('%b %d, %Y')
+                    strike_price = round(target_price)  # Nearest strike
+                    # Approximate probabilities
+                    prob_mc = mc_hit_probability(current_price, target_price, days_to_expiration, implied_vol)
+                    if contract_type == "PUT":
+                        prob_mc = 1 - prob_mc
+                    prob_bs = bs_itm_prob(current_price, target_price, days_to_expiration/252, implied_vol, dividend_yield)
+                    if contract_type == "PUT":
+                        prob_bs = 1 - prob_bs
+                    rationale = f"{pattern_msg} supports a {contract_type.lower()} to ${target_price:.2f}. {trend_bias} trend and sentiment {sentiment:.2f} align."
+                    risk_tip = f"Set stop-loss at ${round(cup_low, 2) if contract_type == 'CALL' else round(cup_high, 2)}."
+                elif triangle:
+                    triangle_high = highs.iloc[0]
+                    triangle_low = lows.iloc[-1]
+                    triangle_depth = triangle_high - triangle_low
+                    target_price = round(triangle_low - triangle_depth, 2) if trend_bias.startswith("Bearish") else round(triangle_high + triangle_depth, 2)
+                    contract_type = "PUT" if trend_bias.startswith("Bearish") else "CALL"
+                    expiration_date = (datetime.now() + pd.Timedelta(days=days_to_expiration)).strftime('%b %d, %Y')
+                    strike_price = round(target_price)
+                    # Approximate probabilities
+                    prob_mc = mc_hit_probability(current_price, target_price, days_to_expiration, implied_vol)
+                    if contract_type == "PUT":
+                        prob_mc = 1 - prob_mc
+                    prob_bs = bs_itm_prob(current_price, target_price, days_to_expiration/252, implied_vol, dividend_yield)
+                    if contract_type == "PUT":
+                        prob_bs = 1 - prob_bs
+                    rationale = f"{pattern_msg} suggests a {contract_type.lower()} to ${target_price:.2f}. {trend_bias} trend supports this."
+                    risk_tip = f"Set stop-loss at ${round(triangle_high, 2) if contract_type == 'PUT' else round(triangle_low, 2)}."
+                elif breakout:
+                    target_price = round(prior_high.iloc[-1] + (prior_high.iloc[-1] - lows.tail(20).min()), 2)
+                    contract_type = "CALL"
+                    expiration_date = (datetime.now() + pd.Timedelta(days=days_to_expiration)).strftime('%b %d, %Y')
+                    strike_price = round(target_price)
+                    # Approximate probabilities
+                    prob_mc = mc_hit_probability(current_price, target_price, days_to_expiration, implied_vol)
+                    prob_bs = bs_itm_prob(current_price, target_price, days_to_expiration/252, implied_vol, dividend_yield)
+                    rationale = f"Breakout of 20-period high supports a CALL to ${target_price:.2f}. {trend_bias} trend aligns."
+                    risk_tip = f"Set stop-loss at ${round(lows.tail(20).min(), 2)}."
+                else:
+                    target_price, contract_type, expiration_date, strike_price, prob_mc, prob_bs, rationale, risk_tip = None, None, None, None, None, None, "No clear pattern for recommendation.", None
+
+                if target_price is not None:
+                    st.subheader(f"📝 Recommended Contract for {symbol}")
+                    st.write(f"Contract: {symbol} {expiration_date} ${strike_price:.2f} {contract_type}")
+                    st.write(f"Target Price: ${target_price:.2f}")
+                    st.write(f"Monte Carlo Probability: {prob_mc*100:.2f}%")
+                    st.write(f"Black-Scholes Probability: {prob_bs*100:.2f}%")
+                    st.write(f"Rationale: {rationale}")
+                    st.write(f"Risk Management: {risk_tip}")
+
             # Chart with markers
             fig = go.Figure(data=[go.Candlestick(
                 x=history.index,
@@ -404,7 +463,7 @@ for symbol in symbols:
             fig.update_layout(title=f"{symbol} Chart", height=300)
             st.plotly_chart(fig, use_container_width=True)
 
-# --- 8️⃣ Prediction History ---
+# --- 9️⃣ Prediction History ---
 st.subheader("📜 Prediction History")
 if st.session_state.prediction_df.empty:
     st.info("No predictions logged yet.")
@@ -424,7 +483,7 @@ else:
                 })
             )
 
-# --- 9️⃣ Summary of Trades by Symbol ---
+# --- 🔟 Summary of Trades by Symbol ---
 st.subheader("📌 Trade Summary by Symbol")
 if df.empty:
     st.info("No trades logged yet.")
