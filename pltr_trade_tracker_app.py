@@ -9,6 +9,9 @@ import numpy as np
 from scipy.stats import norm
 import os
 from pytz import timezone
+from GoogleNews import GoogleNews
+import praw
+import json
 
 # 🔒 Pushover credentials are loaded from Streamlit Secrets
 PUSHOVER_USER_KEY = st.secrets.get("pushover_user_key", "")
@@ -30,11 +33,25 @@ def send_pushover_notification(title, message):
 
 # 📰 News Sentiment Analysis Setup
 NEWS_API_KEY = st.secrets.get("news_api_key", "")
+ALPHA_VANTAGE_API_KEY = st.secrets.get("alpha_vantage_api_key", "")
+FINNHUB_API_KEY = st.secrets.get("finnhub_api_key", "")
+REDDIT_CLIENT_ID = st.secrets.get("reddit_client_id", "")
+REDDIT_CLIENT_SECRET = st.secrets.get("reddit_client_secret", "")
+REDDIT_USER_AGENT = st.secrets.get("reddit_user_agent", "")
 
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 sia = SentimentIntensityAnalyzer()
 
-def get_headlines(symbol):
+# Source weights for sentiment averaging
+SOURCE_WEIGHTS = {
+    "NewsAPI": 0.3,      # Higher weight for established news outlets
+    "Alpha Vantage": 0.3,
+    "Google News": 0.2,
+    "Finnhub": 0.1,
+    "Reddit": 0.1        # Lower weight for user-generated content
+}
+
+def get_headlines_newsapi(symbol):
     """Fetch latest headlines for a given symbol using NewsAPI."""
     if not NEWS_API_KEY:
         return []
@@ -42,15 +59,113 @@ def get_headlines(symbol):
         f"https://newsapi.org/v2/everything?"
         f"q={symbol}&sortBy=publishedAt&pageSize=5&apiKey={NEWS_API_KEY}"
     )
-    articles = requests.get(url).json().get("articles", [])
-    return [f"{a['title']}: {a.get('description','')}" for a in articles]
+    try:
+        articles = requests.get(url).json().get("articles", [])
+        return [(f"{a['title']}: {a.get('description','')}", "NewsAPI") for a in articles]
+    except:
+        return []
 
-def headline_sentiment_score(headlines):
-    """Compute average compound sentiment score for a list of headlines."""
-    if not headlines:
-        return 0.0
-    scores = [sia.polarity_scores(h)["compound"] for h in headlines]
-    return sum(scores) / len(scores)
+def get_headlines_alpha_vantage(symbol):
+    """Fetch latest headlines for a given symbol using Alpha Vantage."""
+    if not ALPHA_VANTAGE_API_KEY:
+        return []
+    url = (
+        f"https://www.alphavantage.co/query?"
+        f"function=NEWS_SENTIMENT&tickers={symbol}&limit=5&apikey={ALPHA_VANTAGE_API_KEY}"
+    )
+    try:
+        response = requests.get(url).json()
+        articles = response.get("feed", [])
+        return [(f"{a['title']}: {a.get('summary','')}", "Alpha Vantage") for a in articles]
+    except:
+        return []
+
+def get_headlines_google_news(symbol):
+    """Fetch latest headlines for a given symbol using GoogleNews library."""
+    try:
+        googlenews = GoogleNews(lang='en', period='7d')
+        googlenews.search(symbol)
+        articles = googlenews.results()[:5]  # Limit to 5 articles
+        return [(f"{a['title']}: {a.get('desc','')}", "Google News") for a in articles]
+    except:
+        return []
+
+def get_headlines_finnhub(symbol):
+    """Fetch latest headlines for a given symbol using Finnhub."""
+    if not FINNHUB_API_KEY:
+        return []
+    from_date = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
+    to_date = datetime.now().strftime('%Y-%m-%d')
+    url = (
+        f"https://finnhub.io/api/v1/company-news?"
+        f"symbol={symbol}&from={from_date}&to={to_date}&token={FINNHUB_API_KEY}"
+    )
+    try:
+        articles = requests.get(url).json()[:5]  # Limit to 5 articles
+        return [(f"{a['headline']}: {a.get('summary','')}", "Finnhub") for a in articles]
+    except:
+        return []
+
+def get_headlines_reddit(symbol):
+    """Fetch latest posts mentioning the symbol from r/wallstreetbets using Reddit API."""
+    if not REDDIT_CLIENT_ID or not REDDIT_CLIENT_SECRET or not REDDIT_USER_AGENT:
+        return []
+    try:
+        reddit = praw.Reddit(
+            client_id=REDDIT_CLIENT_ID,
+            client_secret=REDDIT_CLIENT_SECRET,
+            user_agent=REDDIT_USER_AGENT
+        )
+        subreddit = reddit.subreddit("wallstreetbets")
+        posts = []
+        for submission in subreddit.search(symbol, limit=5):
+            posts.append((f"{submission.title}: {submission.selftext[:200]}", "Reddit"))
+        return posts
+    except:
+        return []
+
+def get_headlines(symbol):
+    """Aggregate headlines from multiple sources with their source labels."""
+    headlines = []
+    headlines.extend(get_headlines_newsapi(symbol))
+    headlines.extend(get_headlines_alpha_vantage(symbol))
+    headlines.extend(get_headlines_google_news(symbol))
+    headlines.extend(get_headlines_finnhub(symbol))
+    headlines.extend(get_headlines_reddit(symbol))
+    # Remove duplicates based on headline text
+    seen = set()
+    unique_headlines = []
+    for headline, source in headlines:
+        if headline not in seen:
+            seen.add(headline)
+            unique_headlines.append((headline, source))
+    return unique_headlines
+
+def headline_sentiment_score(headlines_with_source):
+    """Compute weighted average sentiment score and per-source scores."""
+    if not headlines_with_source:
+        return 0.0, {}
+    
+    per_source_scores = {}
+    for headline, source in headlines_with_source:
+        score = sia.polarity_scores(headline)["compound"]
+        if source not in per_source_scores:
+            per_source_scores[source] = []
+        per_source_scores[source].append(score)
+    
+    # Average sentiment per source
+    per_source_avg = {source: sum(scores)/len(scores) for source, scores in per_source_scores.items()}
+    
+    # Weighted overall sentiment
+    weighted_sum = 0.0
+    total_weight = 0.0
+    for source, avg_score in per_source_avg.items():
+        weight = SOURCE_WEIGHTS.get(source, 0.1)
+        weighted_sum += avg_score * weight
+        total_weight += weight
+    
+    overall_sentiment = weighted_sum / total_weight if total_weight > 0 else 0.0
+    return overall_sentiment, per_source_avg
 
 # --- 🛠️ Monte Carlo & Black-Scholes for Hit Probabilities ---
 @st.cache_data
@@ -100,8 +215,35 @@ def get_next_friday(start_date, days_to_expiration):
         current_date += timedelta(days=1)
     return current_date
 
+# --- Fetch and Analyze SPY Data for Market Trends ---
+@st.cache_data
+def get_spy_trend():
+    """Fetch SPY data and compute trend indicators."""
+    spy_ticker = yf.Ticker("SPY")
+    spy_history = spy_ticker.history(period="10d", interval="5m", prepost=True)
+    if spy_history.empty or len(spy_history) < 2:
+        spy_history = spy_ticker.history(period="10d", interval="15m", prepost=True)
+    
+    # Compute EMA and RSI for SPY
+    spy_history['EMA9'] = spy_history['Close'].ewm(span=9, adjust=False).mean()
+    spy_history['EMA21'] = spy_history['Close'].ewm(span=21, adjust=False).mean()
+    delta = spy_history['Close'].diff()
+    gain = delta.clip(lower=0)
+    loss = (-delta).clip(lower=0)
+    avg_gain = gain.rolling(14).mean()
+    avg_loss = loss.rolling(14).mean()
+    rs = avg_gain / avg_loss
+    spy_history['RSI'] = 100 - (100 / (1 + rs))
+    
+    latest_spy = spy_history.iloc[-1]
+    spy_trend = "Bullish" if latest_spy['EMA9'] > latest_spy['EMA21'] else "Bearish"
+    spy_rsi = round(latest_spy['RSI'], 2)
+    spy_current_price = latest_spy['Close']
+    
+    return spy_trend, spy_rsi, spy_current_price, spy_history
+
 # --- Streamlit Page Setup ---
-st.set_page_config(page_title="Day Trade Tracker with Charts & Alerts", layout="wide")
+st.set_page_config(page_title="Day Trade Tracker with Charts & Alerts", layout="centered")
 
 # --- Hard Stop Control ---
 pause_default = st.query_params.get("pause", ["0"])[0] == "1"
@@ -145,6 +287,23 @@ st.title("📈 Day Trade Tracker with Charts & Alerts")
 # Market status message
 if not is_market_open():
     st.info("⚠️ Market is currently closed (outside 9:30 AM - 4:00 PM EDT). Recommendations are based on the latest available data.")
+
+# --- Display SPY Market Trend ---
+spy_trend, spy_rsi, spy_current_price, spy_history = get_spy_trend()
+st.markdown("### 📉 Market Trend (SPY - S&P 500)")
+st.write(f"**SPY Trend:** {spy_trend}")
+st.metric(label="🔔 SPY Last Close", value=f"${spy_current_price:.2f}")
+st.write(f"**SPY RSI:** {spy_rsi}")
+# SPY Chart
+spy_fig = go.Figure(data=[go.Candlestick(
+    x=spy_history.index,
+    open=spy_history['Open'], high=spy_history['High'],
+    low=spy_history['Low'], close=spy_history['Close']
+)])
+spy_fig.add_trace(go.Scatter(x=spy_history.index, y=spy_history['EMA9'], mode='lines', name='EMA9'))
+spy_fig.add_trace(go.Scatter(x=spy_history.index, y=spy_history['EMA21'], mode='lines', name='EMA21'))
+spy_fig.update_layout(title="SPY Chart", height=300)
+st.plotly_chart(spy_fig, use_container_width=True)
 
 # --- 1️⃣ Load or Initialize Trade Data ---
 @st.cache_data
@@ -281,12 +440,33 @@ for symbol in symbols:
     st.write("Columns:", history.columns.tolist())
 
     # 📰 News Sentiment Analysis
-    headlines = get_headlines(symbol)
-    sentiment = headline_sentiment_score(headlines)
-    st.write(f"📰 News Sentiment (avg score): {sentiment:.2f}")
-    if sentiment > 0.2:
+    headlines_with_source = get_headlines(symbol)
+    overall_sentiment, per_source_scores = headline_sentiment_score(headlines_with_source)
+    st.markdown("### 📰 News Sentiment Analysis")
+    st.write(f"**Overall Sentiment (Weighted Average):** {overall_sentiment:.2f}")
+    st.write("**Sentiment by Source:**")
+    for source, score in per_source_scores.items():
+        st.write(f"- {source}: {score:.2f} (Weight: {SOURCE_WEIGHTS.get(source, 0.1)})")
+    
+    if headlines_with_source:
+        st.write("**Recent Headlines by Source:**")
+        # Group headlines by source
+        headlines_by_source = {}
+        for headline, source in headlines_with_source:
+            if source not in headlines_by_source:
+                headlines_by_source[source] = []
+            headlines_by_source[source].append(headline)
+        
+        for source, source_headlines in headlines_by_source.items():
+            st.write(f"**{source}:**")
+            for h in source_headlines[:3]:  # Limit to 3 per source
+                st.write(f"- {h}")
+    else:
+        st.write("No recent headlines found.")
+
+    if overall_sentiment > 0.2:
         confidence = min(100, confidence + 10)
-    elif sentiment < -0.2:
+    elif overall_sentiment < -0.2:
         confidence = max(0, confidence - 10)
 
     # --- 6️⃣ Strategy Logic & Chart ---
@@ -311,9 +491,15 @@ for symbol in symbols:
             vol_val = latest['Volume']
             avg_vol_val = round(latest['AvgVol'], 0)
 
-            # Confidence Level
+            # Adjust confidence based on SPY trend
             confidence_msg = "Moderate"
             if trend_bias.startswith("Bullish"):
+                if spy_trend == "Bullish":
+                    confidence += 10  # Boost confidence if SPY aligns
+                    confidence_msg = "High (Market Alignment)"
+                elif spy_trend == "Bearish":
+                    confidence -= 10  # Reduce confidence if SPY contradicts
+                    confidence_msg = "Low (Market Divergence)"
                 if macd_val > signal_val and vol_val > avg_vol_val and rsi_val < 65:
                     confidence_msg = "Very High"
                 elif macd_val > signal_val and rsi_val < 65:
@@ -321,18 +507,26 @@ for symbol in symbols:
                 elif 45 <= rsi_val <= 55:
                     confidence_msg = "Low"
             else:
+                if spy_trend == "Bearish":
+                    confidence += 10  # Boost confidence if SPY aligns
+                    confidence_msg = "High (Market Alignment)"
+                elif spy_trend == "Bullish":
+                    confidence -= 10  # Reduce confidence if SPY contradicts
+                    confidence_msg = "Low (Market Divergence)"
                 if macd_val < signal_val and vol_val > avg_vol_val and rsi_val > 35:
                     confidence_msg = "Very High"
                 elif macd_val < signal_val and rsi_val > 35:
                     confidence_msg = "High"
                 elif 45 <= rsi_val <= 55:
                     confidence_msg = "Low"
+            confidence = max(0, min(100, confidence))  # Keep confidence within 0-100
 
-            # Display prediction
-            st.subheader(f"📌 Suggested Strategy: {trend_bias} — {confidence_msg} Confidence")
+            # Display prediction with market context
+            st.subheader(f"📌 Suggested Strategy: {trend_bias} — {confidence_msg}")
             st.write(f"📊 RSI: {rsi_val}")
             st.write(f"📊 MACD: {macd_val} vs Signal: {signal_val}")
             st.write(f"📊 Volume: {vol_val} vs AvgVol: {avg_vol_val}")
+            st.write(f"**Market Context:** SPY is {spy_trend}, RSI at {spy_rsi}. Confidence adjusted accordingly.")
 
             # --- 7️⃣ Probability Analysis ---
             symbol_trades = df[df['Symbol'] == symbol]
@@ -421,7 +615,9 @@ for symbol in symbols:
                     prob_bs = bs_itm_prob(current_price, target_price, trading_days/252, implied_vol, dividend_yield)
                     if contract_type == "PUT":
                         prob_bs = 1 - prob_bs
-                    rationale = f"{pattern_msg} supports a {contract_type.lower()} to ${target_price:.2f}. {trend_bias} trend and sentiment {sentiment:.2f} align."
+                    # Adjust rationale based on SPY trend
+                    market_note = f"Market ({spy_trend}) supports this move." if (spy_trend == "Bullish" and contract_type == "CALL") or (spy_trend == "Bearish" and contract_type == "PUT") else f"Market ({spy_trend}) contradicts this move."
+                    rationale = f"{pattern_msg} supports a {contract_type.lower()} to ${target_price:.2f}. {trend_bias} trend and sentiment {overall_sentiment:.2f} align. {market_note}"
                     risk_tip = f"Set stop-loss at ${round(cup_low, 2) if contract_type == 'CALL' else round(cup_high, 2)}."
                 elif triangle:
                     triangle_high = highs.iloc[0]
@@ -440,7 +636,8 @@ for symbol in symbols:
                     prob_bs = bs_itm_prob(current_price, target_price, trading_days/252, implied_vol, dividend_yield)
                     if contract_type == "PUT":
                         prob_bs = 1 - prob_bs
-                    rationale = f"{pattern_msg} suggests a {contract_type.lower()} to ${target_price:.2f}. {trend_bias} trend supports this."
+                    market_note = f"Market ({spy_trend}) supports this move." if (spy_trend == "Bullish" and contract_type == "CALL") or (spy_trend == "Bearish" and contract_type == "PUT") else f"Market ({spy_trend}) contradicts this move."
+                    rationale = f"{pattern_msg} suggests a {contract_type.lower()} to ${target_price:.2f}. {trend_bias} trend supports this. {market_note}"
                     risk_tip = f"Set stop-loss at ${round(triangle_high, 2) if contract_type == 'PUT' else round(triangle_low, 2)}."
                 elif breakout:
                     target_price = round(prior_high.iloc[-1] + (prior_high.iloc[-1] - lows.tail(20).min()), 2)
@@ -452,7 +649,8 @@ for symbol in symbols:
                     trading_days = sum(1 for i in range((expiration_date - datetime.now()).days + 1) if (datetime.now() + timedelta(days=i)).weekday() < 5)
                     prob_mc = mc_hit_probability(current_price, target_price, trading_days, implied_vol)
                     prob_bs = bs_itm_prob(current_price, target_price, trading_days/252, implied_vol, dividend_yield)
-                    rationale = f"Breakout of 20-period high supports a CALL to ${target_price:.2f}. {trend_bias} trend aligns."
+                    market_note = f"Market ({spy_trend}) supports this move." if spy_trend == "Bullish" else f"Market ({spy_trend}) contradicts this move."
+                    rationale = f"Breakout of 20-period high supports a CALL to ${target_price:.2f}. {trend_bias} trend aligns. {market_note}"
                     risk_tip = f"Set stop-loss at ${round(lows.tail(20).min(), 2)}."
                 else:
                     target_price, contract_type, expiration_date, expiration_str, strike_price, prob_mc, prob_bs, rationale, risk_tip = None, None, None, None, None, None, None, "No clear pattern for recommendation.", None
