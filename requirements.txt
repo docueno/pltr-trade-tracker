@@ -9,5 +9,3 @@ scipy
 pytz
 praw
 vaderSentiment
-pygooglenews==0.1.2
-feedparser>=6.0.10

@@ -9,7 +9,7 @@ import numpy as np
 from scipy.stats import norm
 import os
 from pytz import timezone
-from GoogleNews import GoogleNews
+# import GoogleNews  # Commented out temporarily
 import praw
 import json
 
@@ -37,16 +37,15 @@ ALPHA_VANTAGE_API_KEY = st.secrets.get("alpha_vantage_api_key", "")
 FINNHUB_API_KEY = st.secrets.get("finnhub_api_key", "")
 REDDIT_CLIENT_ID = st.secrets.get("reddit_client_id", "")
 REDDIT_CLIENT_SECRET = st.secrets.get("reddit_client_secret", "")
-REDDIT_USER_AGENT = st.secrets.get("reddit_user_agent", "")
+REDDIT_USER_AGENT = st.secrets.get("reddit_user_agent", "pltr_trade_tracker/1.0 by /u/unknown")  # Default user agent
 
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 sia = SentimentIntensityAnalyzer()
 
 # Source weights for sentiment averaging
 SOURCE_WEIGHTS = {
-    "NewsAPI": 0.3,      # Higher weight for established news outlets
-    "Alpha Vantage": 0.3,
-    "Google News": 0.2,
+    "NewsAPI": 0.4,      # Adjusted weight to compensate for missing Google News
+    "Alpha Vantage": 0.4,
     "Finnhub": 0.1,
     "Reddit": 0.1        # Lower weight for user-generated content
 }
@@ -80,15 +79,15 @@ def get_headlines_alpha_vantage(symbol):
     except:
         return []
 
-def get_headlines_google_news(symbol):
-    """Fetch latest headlines for a given symbol using GoogleNews library."""
-    try:
-        googlenews = GoogleNews(lang='en', period='7d')
-        googlenews.search(symbol)
-        articles = googlenews.results()[:5]  # Limit to 5 articles
-        return [(f"{a['title']}: {a.get('desc','')}", "Google News") for a in articles]
-    except:
-        return []
+# def get_headlines_google_news(symbol):  # Commented out temporarily
+#     """Fetch latest headlines for a given symbol using GoogleNews library."""
+#     try:
+#         googlenews = GoogleNews(lang='en', period='7d')
+#         googlenews.search(symbol)
+#         articles = googlenews.results()[:5]  # Limit to 5 articles
+#         return [(f"{a['title']}: {a.get('desc','')}", "Google News") for a in articles]
+#     except:
+#         return []
 
 def get_headlines_finnhub(symbol):
     """Fetch latest headlines for a given symbol using Finnhub."""
@@ -108,7 +107,8 @@ def get_headlines_finnhub(symbol):
 
 def get_headlines_reddit(symbol):
     """Fetch latest posts mentioning the symbol from r/wallstreetbets using Reddit API."""
-    if not REDDIT_CLIENT_ID or not REDDIT_CLIENT_SECRET or not REDDIT_USER_AGENT:
+    if not REDDIT_CLIENT_ID or not REDDIT_CLIENT_SECRET:
+        st.warning("Reddit API credentials not found. Please update Streamlit secrets with reddit_client_id and reddit_client_secret.")
         return []
     try:
         reddit = praw.Reddit(
@@ -121,7 +121,8 @@ def get_headlines_reddit(symbol):
         for submission in subreddit.search(symbol, limit=5):
             posts.append((f"{submission.title}: {submission.selftext[:200]}", "Reddit"))
         return posts
-    except:
+    except Exception as e:
+        st.error(f"Error fetching Reddit data: {str(e)}")
         return []
 
 def get_headlines(symbol):
@@ -129,7 +130,7 @@ def get_headlines(symbol):
     headlines = []
     headlines.extend(get_headlines_newsapi(symbol))
     headlines.extend(get_headlines_alpha_vantage(symbol))
-    headlines.extend(get_headlines_google_news(symbol))
+    # headlines.extend(get_headlines_google_news(symbol))  # Commented out temporarily
     headlines.extend(get_headlines_finnhub(symbol))
     headlines.extend(get_headlines_reddit(symbol))
     # Remove duplicates based on headline text
