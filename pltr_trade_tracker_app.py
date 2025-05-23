@@ -8,6 +8,7 @@ from streamlit_autorefresh import st_autorefresh
 import numpy as np
 from scipy.stats import norm
 import os
+from pytz import timezone
 
 # 🔒 Pushover credentials are loaded from Streamlit Secrets
 PUSHOVER_USER_KEY = st.secrets.get("pushover_user_key", "")
@@ -79,6 +80,12 @@ def bs_itm_prob(S0, K, T_years, vol, dividend_yield=0.0, risk_free_rate=0.04):
     d2 = (np.log(S0/K) + (risk_free_rate - dividend_yield - 0.5 * vol**2) * T_years) / (vol * np.sqrt(T_years))
     return norm.cdf(d2)
 
+# Check market status (NYSE hours: 9:30 AM - 4:00 PM EDT)
+def is_market_open():
+    eastern = timezone('US/Eastern')
+    now = datetime.now(eastern)
+    return now.weekday() < 5 and time(9, 30) <= now.time() <= time(16, 0)
+
 # --- Streamlit Page Setup ---
 st.set_page_config(page_title="Day Trade Tracker with Charts & Alerts", layout="wide")
 
@@ -120,6 +127,10 @@ if auto_refresh:
 
 # --- Main Page ---
 st.title("📈 Day Trade Tracker with Charts & Alerts")
+
+# Market status message
+if not is_market_open():
+    st.info("⚠️ Market is currently closed (outside 9:30 AM - 4:00 PM EDT). Pattern recognition and indicators are based on the latest available data.")
 
 # --- 1️⃣ Load or Initialize Trade Data ---
 @st.cache_data
@@ -187,9 +198,9 @@ if 'latest_probs' not in st.session_state:
 for symbol in symbols:
     st.markdown(f"## 📊 {symbol} Analysis")
     ticker = yf.Ticker(symbol)
-    history = ticker.history(period="5d", interval="5m")
+    history = ticker.history(period="10d", interval="5m", prepost=True)
     if history.empty or len(history) < 2:
-        history = ticker.history(period="5d", interval="15m")
+        history = ticker.history(period="10d", interval="15m", prepost=True)
 
     # Fetch dividend yield
     dividend_yield = ticker.info.get('dividendYield', 0.0) or 0.0
@@ -244,7 +255,11 @@ for symbol in symbols:
         pattern_msg = "Breakout of 20-period high"
     else:
         pattern_msg = "No pattern detected"
-    st.write(f"🧠 Pattern Recognition: {pattern_msg}")
+    # Cache pattern for display outside market hours
+    if 'pattern_msg' not in st.session_state:
+        st.session_state.pattern_msg = {}
+    st.session_state.pattern_msg[symbol] = pattern_msg
+    st.write(f"🧠 Pattern Recognition: {st.session_state.pattern_msg.get(symbol, 'No pattern detected')}")
     st.markdown("### 📊 Debug Info")
     st.write("Last 5 Rows of History:")
     st.dataframe(history.tail(5))
