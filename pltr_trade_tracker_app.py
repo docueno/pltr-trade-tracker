@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 import yfinance as yf
 import plotly.graph_objs as go
 import requests
@@ -85,6 +85,20 @@ def is_market_open():
     eastern = timezone('US/Eastern')
     now = datetime.now(eastern)
     return now.weekday() < 5 and time(9, 30) <= now.time() <= time(16, 0)
+
+# Adjust expiration date to the nearest Friday (weekly options)
+def get_next_friday(start_date, days_to_expiration):
+    current_date = start_date
+    trading_days = 0
+    while trading_days < days_to_expiration:
+        current_date += timedelta(days=1)
+        # Skip weekends (Saturday=5, Sunday=6)
+        if current_date.weekday() < 5:
+            trading_days += 1
+    # Adjust to the nearest Friday
+    while current_date.weekday() != 4:  # Friday = 4
+        current_date += timedelta(days=1)
+    return current_date
 
 # --- Streamlit Page Setup ---
 st.set_page_config(page_title="Day Trade Tracker with Charts & Alerts", layout="wide")
@@ -356,7 +370,7 @@ for symbol in symbols:
 
                 new_prediction = pd.DataFrame([{
                     "Symbol": symbol,
-                    "Timestamp": datetime.now().strftime('%Y-%m-%d %H:M:%S'),
+                    "Timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                     "Trade Type": trade_type,
                     "Target Price": target,
                     "Days to Expiration": days_to_expiration,
@@ -396,13 +410,15 @@ for symbol in symbols:
                     cup_depth = cup_high - cup_low
                     target_price = round(cup_high + cup_depth, 2) if trend_bias.startswith("Bullish") else round(cup_low - cup_depth, 2)
                     contract_type = "CALL" if trend_bias.startswith("Bullish") else "PUT"
-                    expiration_date = (datetime.now() + pd.Timedelta(days=days_to_expiration)).strftime('%b %d, %Y')
+                    expiration_date = get_next_friday(datetime.now(), days_to_expiration)
+                    expiration_str = expiration_date.strftime('%b %d, %Y')
                     strike_price = round(target_price)  # Nearest strike
                     # Approximate probabilities
-                    prob_mc = mc_hit_probability(current_price, target_price, days_to_expiration, implied_vol)
+                    trading_days = sum(1 for i in range((expiration_date - datetime.now()).days + 1) if (datetime.now() + timedelta(days=i)).weekday() < 5)
+                    prob_mc = mc_hit_probability(current_price, target_price, trading_days, implied_vol)
                     if contract_type == "PUT":
                         prob_mc = 1 - prob_mc
-                    prob_bs = bs_itm_prob(current_price, target_price, days_to_expiration/252, implied_vol, dividend_yield)
+                    prob_bs = bs_itm_prob(current_price, target_price, trading_days/252, implied_vol, dividend_yield)
                     if contract_type == "PUT":
                         prob_bs = 1 - prob_bs
                     rationale = f"{pattern_msg} supports a {contract_type.lower()} to ${target_price:.2f}. {trend_bias} trend and sentiment {sentiment:.2f} align."
@@ -413,13 +429,15 @@ for symbol in symbols:
                     triangle_depth = triangle_high - triangle_low
                     target_price = round(triangle_low - triangle_depth, 2) if trend_bias.startswith("Bearish") else round(triangle_high + triangle_depth, 2)
                     contract_type = "PUT" if trend_bias.startswith("Bearish") else "CALL"
-                    expiration_date = (datetime.now() + pd.Timedelta(days=days_to_expiration)).strftime('%b %d, %Y')
+                    expiration_date = get_next_friday(datetime.now(), days_to_expiration)
+                    expiration_str = expiration_date.strftime('%b %d, %Y')
                     strike_price = round(target_price)
                     # Approximate probabilities
-                    prob_mc = mc_hit_probability(current_price, target_price, days_to_expiration, implied_vol)
+                    trading_days = sum(1 for i in range((expiration_date - datetime.now()).days + 1) if (datetime.now() + timedelta(days=i)).weekday() < 5)
+                    prob_mc = mc_hit_probability(current_price, target_price, trading_days, implied_vol)
                     if contract_type == "PUT":
                         prob_mc = 1 - prob_mc
-                    prob_bs = bs_itm_prob(current_price, target_price, days_to_expiration/252, implied_vol, dividend_yield)
+                    prob_bs = bs_itm_prob(current_price, target_price, trading_days/252, implied_vol, dividend_yield)
                     if contract_type == "PUT":
                         prob_bs = 1 - prob_bs
                     rationale = f"{pattern_msg} suggests a {contract_type.lower()} to ${target_price:.2f}. {trend_bias} trend supports this."
@@ -427,19 +445,21 @@ for symbol in symbols:
                 elif breakout:
                     target_price = round(prior_high.iloc[-1] + (prior_high.iloc[-1] - lows.tail(20).min()), 2)
                     contract_type = "CALL"
-                    expiration_date = (datetime.now() + pd.Timedelta(days=days_to_expiration)).strftime('%b %d, %Y')
+                    expiration_date = get_next_friday(datetime.now(), days_to_expiration)
+                    expiration_str = expiration_date.strftime('%b %d, %Y')
                     strike_price = round(target_price)
                     # Approximate probabilities
-                    prob_mc = mc_hit_probability(current_price, target_price, days_to_expiration, implied_vol)
-                    prob_bs = bs_itm_prob(current_price, target_price, days_to_expiration/252, implied_vol, dividend_yield)
+                    trading_days = sum(1 for i in range((expiration_date - datetime.now()).days + 1) if (datetime.now() + timedelta(days=i)).weekday() < 5)
+                    prob_mc = mc_hit_probability(current_price, target_price, trading_days, implied_vol)
+                    prob_bs = bs_itm_prob(current_price, target_price, trading_days/252, implied_vol, dividend_yield)
                     rationale = f"Breakout of 20-period high supports a CALL to ${target_price:.2f}. {trend_bias} trend aligns."
                     risk_tip = f"Set stop-loss at ${round(lows.tail(20).min(), 2)}."
                 else:
-                    target_price, contract_type, expiration_date, strike_price, prob_mc, prob_bs, rationale, risk_tip = None, None, None, None, None, None, "No clear pattern for recommendation.", None
+                    target_price, contract_type, expiration_date, expiration_str, strike_price, prob_mc, prob_bs, rationale, risk_tip = None, None, None, None, None, None, None, "No clear pattern for recommendation.", None
 
                 if target_price is not None:
                     st.subheader(f"📝 Recommended Contract for {symbol}")
-                    st.write(f"Contract: {symbol} {expiration_date} ${strike_price:.2f} {contract_type}")
+                    st.write(f"Contract: {symbol} {expiration_str} ${strike_price:.2f} {contract_type}")
                     st.write(f"Target Price: ${target_price:.2f}")
                     st.write(f"Monte Carlo Probability: {prob_mc*100:.2f}%")
                     st.write(f"Black-Scholes Probability: {prob_bs*100:.2f}%")
