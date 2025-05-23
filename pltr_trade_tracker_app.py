@@ -10,9 +10,6 @@ from scipy.stats import norm
 import os
 
 # 🔒 Pushover credentials are loaded from Streamlit Secrets
-#   Configure these in your Streamlit Cloud settings under "Secrets":
-#   pushover_user_key  = "<your Pushover User Key>"
-#   pushover_api_token = "<your Pushover API Token>"
 PUSHOVER_USER_KEY = st.secrets.get("pushover_user_key", "")
 PUSHOVER_API_TOKEN = st.secrets.get("pushover_api_token", "")
 
@@ -33,7 +30,6 @@ def send_pushover_notification(title, message):
 # 📰 News Sentiment Analysis Setup
 NEWS_API_KEY = st.secrets.get("news_api_key", "")
 
-# Optional: use VADER for lightweight sentiment
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 sia = SentimentIntensityAnalyzer()
 
@@ -74,18 +70,17 @@ def mc_hit_probability(S0, target, T_days, vol_annual, n_sims=10000, n_steps=100
     return hits / n_sims
 
 @st.cache_data
-def bs_itm_prob(S0, K, T_years, vol):
+def bs_itm_prob(S0, K, T_years, vol, dividend_yield=0.0, risk_free_rate=0.04):
     """
-    Compute Black–Scholes probability S_T > K at expiry T_years.
+    Compute Black-Scholes probability S_T > K at expiry T_years, adjusted for dividends.
     """
-    d2 = (np.log(S0/K) - 0.5 * vol**2 * T_years) / (vol * np.sqrt(T_years))
+    d2 = (np.log(S0/K) + (risk_free_rate - dividend_yield - 0.5 * vol**2) * T_years) / (vol * np.sqrt(T_years))
     return norm.cdf(d2)
 
 # --- Streamlit Page Setup ---
 st.set_page_config(page_title="Day Trade Tracker with Charts & Alerts", layout="wide")
 
 # --- Hard Stop Control ---
-# Use query_params API for persistence
 pause_default = st.query_params.get("pause", ["0"])[0] == "1"
 pause_all = st.sidebar.checkbox(
     "Pause All App Logic",
@@ -100,7 +95,7 @@ if pause_all:
 else:
     st.query_params = {"pause": ["0"]}
 
-# --- Sidebar Controls (always visible) ---
+# --- Sidebar Controls ---
 with st.sidebar:
     st.header("🔧 Auto-Refresh Settings")
     auto_refresh = st.checkbox(
@@ -129,14 +124,13 @@ st.title("📈 Day Trade Tracker with Charts & Alerts")
 def load_data():
     return pd.DataFrame(columns=[
         "Symbol", "Date", "Trade Type", "Entry Price", "Exit Price",
-        "Stop Loss", "Target Price", "Days to Expiration", "Actual Result",
-        "Confidence", "Notes"
+        "Stop Loss", "Target Price", "Days to Expiration", "Implied Volatility",
+        "Actual Result", "Confidence", "Notes"
     ])
 
 df = load_data()
 
 # --- 2️⃣ Initialize Prediction History ---
-# Load or initialize prediction history DataFrame
 prediction_file = "prediction_history.csv"
 if 'prediction_df' not in st.session_state:
     if os.path.exists(prediction_file):
@@ -148,13 +142,11 @@ if 'prediction_df' not in st.session_state:
         ])
 
 # --- 3️⃣ Symbol Selection & Trade Logging Form ---
-# Enter symbols to track
 symbols_input = st.text_input("Enter symbols to track (comma-separated):", value="")
 symbols = [s.strip().upper() for s in symbols_input.split(",") if s.strip()]
 
 with st.form("trade_form"):
     st.subheader("Log a New Trade")
-    # Choose which symbol this trade applies to
     trade_symbol = st.selectbox("Symbol", symbols)
     trade_type = st.selectbox("Trade Type", ["Breakout", "Breakdown", "Range", "Call", "Put"])
     entry = st.number_input("Entry Price", format="%.2f")
@@ -162,6 +154,7 @@ with st.form("trade_form"):
     stop = st.number_input("Stop Loss", format="%.2f")
     target = st.number_input("Target Price", format="%.2f")
     days_to_expiration = st.number_input("Days to Expiration", min_value=1, max_value=252, value=5)
+    implied_vol = st.number_input("Implied Volatility (%)", min_value=0.0, max_value=100.0, value=30.0, format="%.2f") / 100
     result = st.selectbox("Trade Result", ["Pending", "Win", "Loss", "Breakeven"])
     confidence = st.slider("Confidence Level", 0, 100, 50)
     notes = st.text_area("Notes")
@@ -177,6 +170,7 @@ with st.form("trade_form"):
             "Stop Loss": stop,
             "Target Price": target,
             "Days to Expiration": days_to_expiration,
+            "Implied Volatility": implied_vol,
             "Actual Result": result,
             "Confidence": confidence,
             "Notes": notes
@@ -185,7 +179,6 @@ with st.form("trade_form"):
         st.success("Trade added successfully!")
 
 # --- 4️⃣ Fetch & Compute Indicators for Each Symbol ---
-# Initialize latest probabilities in session state
 if 'latest_probs' not in st.session_state:
     st.session_state.latest_probs = {}
 
@@ -194,8 +187,10 @@ for symbol in symbols:
     ticker = yf.Ticker(symbol)
     history = ticker.history(period="5d", interval="5m")
     if history.empty or len(history) < 2:
-        # Fallback to 15m if 5m data insufficient
         history = ticker.history(period="5d", interval="15m")
+
+    # Fetch dividend yield
+    dividend_yield = ticker.info.get('dividendYield', 0.0) or 0.0  # Default to 0 if not available
 
     # Compute EMA and RSI
     history['EMA9'] = history['Close'].ewm(span=9, adjust=False).mean()
@@ -217,14 +212,13 @@ for symbol in symbols:
     # Compute average volume
     history['AvgVol'] = history['Volume'].rolling(20).mean()
 
-    # Compute historical volatility
+    # Compute historical volatility (fallback)
     log_returns = np.log(history['Close'] / history['Close'].shift(1))
-    vol_annual = np.std(log_returns) * np.sqrt(252) if not log_returns.empty else 0.3  # Default to 30% if insufficient data
+    vol_annual = np.std(log_returns) * np.sqrt(252) if not log_returns.empty else 0.3
     if log_returns.empty:
         st.warning(f"⚠️ Insufficient data for volatility calculation for {symbol}. Using default 30%.")
 
     # --- 5️⃣ Debug Info ---
-    # 🧠 Pattern Recognition
     last_close = history['Close'].iloc[-1]
     prior_high = history['High'].rolling(window=20).max().shift(1)
     breakout = last_close > prior_high.iloc[-1] if not prior_high.empty else False
@@ -310,15 +304,14 @@ for symbol in symbols:
             st.write(f"📊 Volume: {vol_val} vs AvgVol: {avg_vol_val}")
 
             # --- 7️⃣ Probability Analysis ---
-            # Get target price, entry, stop, trade type, and days to expiration from the latest trade for this symbol
             symbol_trades = df[df['Symbol'] == symbol]
             target = symbol_trades['Target Price'].iloc[-1] if not symbol_trades.empty else None
             entry = symbol_trades['Entry Price'].iloc[-1] if not symbol_trades.empty else None
             stop = symbol_trades['Stop Loss'].iloc[-1] if not symbol_trades.empty else None
             trade_type = symbol_trades['Trade Type'].iloc[-1] if not symbol_trades.empty else None
             days_to_expiration = symbol_trades['Days to Expiration'].iloc[-1] if not symbol_trades.empty else 5
+            implied_vol = symbol_trades['Implied Volatility'].iloc[-1] if not symbol_trades.empty else vol_annual
 
-            # Initialize latest_probs for this symbol if not exists
             if symbol not in st.session_state.latest_probs:
                 st.session_state.latest_probs[symbol] = {
                     "target": None,
@@ -327,12 +320,10 @@ for symbol in symbols:
                     "prob_bs": None
                 }
 
-            # Compute probabilities if data is valid
-            if target is not None and not np.isnan(vol_annual):
-                prob_mc = mc_hit_probability(current_price, target, days_to_expiration, vol_annual)
-                prob_bs = bs_itm_prob(current_price, target, days_to_expiration/252, vol_annual)
+            if target is not None and not np.isnan(implied_vol):
+                prob_mc = mc_hit_probability(current_price, target, days_to_expiration, implied_vol)
+                prob_bs = bs_itm_prob(current_price, target, days_to_expiration/252, implied_vol, dividend_yield)
                 
-                # Update latest probabilities
                 st.session_state.latest_probs[symbol] = {
                     "target": target,
                     "days_to_expiration": days_to_expiration,
@@ -340,7 +331,6 @@ for symbol in symbols:
                     "prob_bs": prob_bs
                 }
 
-                # Append to prediction history
                 new_prediction = pd.DataFrame([{
                     "Symbol": symbol,
                     "Timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
@@ -353,17 +343,14 @@ for symbol in symbols:
                 st.session_state.prediction_df = pd.concat(
                     [st.session_state.prediction_df, new_prediction], ignore_index=True
                 )
-                # Save to CSV
                 st.session_state.prediction_df.to_csv(prediction_file, index=False)
 
-                # Send notification if probability is high
                 if prob_mc > 0.7 or prob_bs > 0.7:
                     send_pushover_notification(
                         f"High Probability Alert for {symbol}",
                         f"High chance of hitting ${target:.2f} ({trade_type}): MC {prob_mc*100:.2f}%, BS {prob_bs*100:.2f}%"
                     )
 
-            # Display latest probabilities (persistent)
             st.subheader(f"📈 Probability Analysis for {symbol}")
             latest_prob = st.session_state.latest_probs.get(symbol, {})
             if latest_prob["target"] is not None:
@@ -372,7 +359,6 @@ for symbol in symbols:
             else:
                 st.warning("⚠️ No target price or valid volatility data available for probability analysis.")
 
-            # Push notification on trend change
             if 'last_trend_bias' not in st.session_state or st.session_state.last_trend_bias != trend_bias:
                 send_pushover_notification("Strategy Update", f"{symbol} trend: {trend_bias} at ${current_price:.2f}")
                 st.session_state.last_trend_bias = trend_bias
@@ -385,7 +371,6 @@ for symbol in symbols:
             )])
             fig.add_trace(go.Scatter(x=history.index, y=history['EMA9'], mode='lines', name='EMA9'))
             fig.add_trace(go.Scatter(x=history.index, y=history['EMA21'], mode='lines', name='EMA21'))
-            # Only add hlines if valid values exist
             if entry is not None and not np.isnan(entry):
                 fig.add_hline(y=entry, line=dict(color='blue', dash='dot'), annotation_text='Entry', annotation_position='top left')
             if target is not None and not np.isnan(target):
@@ -443,6 +428,5 @@ else:
 csv = df.to_csv(index=False).encode('utf-8')
 st.download_button("📥 Download All Trades", data=csv, file_name='trades.csv', mime='text/csv')
 
-# Download prediction history
 pred_csv = st.session_state.prediction_df.to_csv(index=False).encode('utf-8')
 st.download_button("📥 Download Prediction History", data=pred_csv, file_name='prediction_history.csv', mime='text/csv')
