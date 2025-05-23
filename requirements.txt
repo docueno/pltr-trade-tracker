@@ -9,4 +9,4 @@ scipy
 pytz
 praw
 vaderSentiment
-pygooglenews
+pygooglenews==0.1.2
