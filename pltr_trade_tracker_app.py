@@ -56,7 +56,8 @@ def headline_sentiment_score(headlines):
 def mc_hit_probability(S0, target, T_days, vol_annual, n_sims=10000, n_steps=100):
     """
     Estimate probability that a GBM path starting at S0
-    hits `target` within T_days trading days.
+    hits `target` above (for CALL) or stays below (for PUT) within T_days trading days.
+    Returns probability of hitting above target; invert for PUT logic.
     """
     dt = (T_days/252) / n_steps
     drift = -0.5 * vol_annual**2 * dt
@@ -72,7 +73,8 @@ def mc_hit_probability(S0, target, T_days, vol_annual, n_sims=10000, n_steps=100
 @st.cache_data
 def bs_itm_prob(S0, K, T_years, vol, dividend_yield=0.0, risk_free_rate=0.04):
     """
-    Compute Black-Scholes probability S_T > K at expiry T_years, adjusted for dividends.
+    Compute Black-Scholes probability S_T > K at expiry T_years (for CALL) or < K (for PUT with 1 - result).
+    Adjusted for dividends.
     """
     d2 = (np.log(S0/K) + (risk_free_rate - dividend_yield - 0.5 * vol**2) * T_years) / (vol * np.sqrt(T_years))
     return norm.cdf(d2)
@@ -190,7 +192,7 @@ for symbol in symbols:
         history = ticker.history(period="5d", interval="15m")
 
     # Fetch dividend yield
-    dividend_yield = ticker.info.get('dividendYield', 0.0) or 0.0  # Default to 0 if not available
+    dividend_yield = ticker.info.get('dividendYield', 0.0) or 0.0
 
     # Compute EMA and RSI
     history['EMA9'] = history['Close'].ewm(span=9, adjust=False).mean()
@@ -309,7 +311,7 @@ for symbol in symbols:
             entry = symbol_trades['Entry Price'].iloc[-1] if not symbol_trades.empty else None
             stop = symbol_trades['Stop Loss'].iloc[-1] if not symbol_trades.empty else None
             trade_type = symbol_trades['Trade Type'].iloc[-1] if not symbol_trades.empty else None
-            days_to_expiration = symbol_trades['Days to Expiration'].iloc[-1] if not symbol_trades.empty else 5
+            days_to_expiration = symbol_trades['Days to Expiration'].iloc[-1] if not symbol_trades.empty else 1
             implied_vol = symbol_trades['Implied Volatility'].iloc[-1] if not symbol_trades.empty else vol_annual
 
             if symbol not in st.session_state.latest_probs:
@@ -321,8 +323,14 @@ for symbol in symbols:
                 }
 
             if target is not None and not np.isnan(implied_vol):
+                # Monte Carlo Probability (hit probability below target for PUT, above for CALL)
                 prob_mc = mc_hit_probability(current_price, target, days_to_expiration, implied_vol)
+                if trade_type in ['Put', 'PUT', 'Breakdown']:
+                    prob_mc = 1 - prob_mc  # Probability of hitting below target for PUT
+                # Black-Scholes Probability (expiration probability below target for PUT, above for CALL)
                 prob_bs = bs_itm_prob(current_price, target, days_to_expiration/252, implied_vol, dividend_yield)
+                if trade_type in ['Put', 'PUT', 'Breakdown']:
+                    prob_bs = 1 - prob_bs  # Probability of being below target at expiration for PUT
                 
                 st.session_state.latest_probs[symbol] = {
                     "target": target,
@@ -354,8 +362,9 @@ for symbol in symbols:
             st.subheader(f"📈 Probability Analysis for {symbol}")
             latest_prob = st.session_state.latest_probs.get(symbol, {})
             if latest_prob["target"] is not None:
-                st.write(f"Monte Carlo Probability of hitting ${latest_prob['target']:.2f} within {latest_prob['days_to_expiration']} days: {latest_prob['prob_mc']*100:.2f}%")
-                st.write(f"Black-Scholes Probability of being above ${latest_prob['target']:.2f} at expiration: {latest_prob['prob_bs']*100:.2f}%")
+                action = "below" if trade_type in ['Put', 'PUT', 'Breakdown'] else "above"
+                st.write(f"Monte Carlo Probability of hitting ${latest_prob['target']:.2f} {action} within {latest_prob['days_to_expiration']} days: {latest_prob['prob_mc']*100:.2f}%")
+                st.write(f"Black-Scholes Probability of being {action} ${latest_prob['target']:.2f} at expiration: {latest_prob['prob_bs']*100:.2f}%")
             else:
                 st.warning("⚠️ No target price or valid volatility data available for probability analysis.")
 
